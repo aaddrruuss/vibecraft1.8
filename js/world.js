@@ -19,7 +19,8 @@ VC.World = class {
     this.seed = seed;
     this.nether = !!opts.nether;
     this.hasSky = !this.nether;
-    this.gen = this.nether ? new VC.NetherGenerator(seed) : new VC.Generator(seed);
+    const mini = !this.nether && opts.type && VC.Minigames && VC.Minigames.TYPES[opts.type];
+    this.gen = this.nether ? new VC.NetherGenerator(seed) : mini ? new mini.Generator(seed) : new VC.Generator(seed);
     this.chunks = new Map();
     this.edits = new Map(); // chunkKey -> Map(localIndex -> state)
     if (savedEdits) for (const k in savedEdits) this.edits.set(k, new Map(savedEdits[k]));

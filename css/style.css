@@ -345,3 +345,9 @@ button.mc.half { width: 196px; }
 #playerlist .pl-row { display: flex; justify-content: space-between; gap: 24px; padding: 2px 8px; background: rgba(255, 255, 255, 0.08); }
 #playerlist .pl-row.you { background: rgba(255, 255, 255, 0.18); }
 #playerlist .pl-ping { min-width: 64px; text-align: right; }
+
+/* ---------- Minigames ---------- */
+.minigame-card { width: 420px; max-width: 94vw; padding: 12px; background: rgba(0, 0, 0, 0.45); display: flex; flex-direction: column; gap: 8px; }
+.minigame-card .mg-title { font-size: 20px; color: #ffff80; }
+.minigame-card .mg-desc { font-size: 14px; color: #d0d0d0; line-height: 1.35; }
+.minigame-card .buttons { margin-top: 4px; }

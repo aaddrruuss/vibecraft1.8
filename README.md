@@ -74,6 +74,16 @@ redstone (polvo, repetidores, comparadores, pistones, lámparas, sensores…), v
 reloj animados, caña de pescar, encantamientos, pociones con efectos, soporte de pociones, faro, cuadros, marcos,
 soportes de armadura, carteles (sin texto), correas y etiquetas.
 
+## Minijuegos
+
+Menú principal → **Minijuegos...**. Cada minijuego tiene su propia partida guardada (no toca tu mundo normal) y
+se puede jugar online igual que un mundo normal (Esc → Abrir sala online).
+
+- **Skyblock:** una isla flotante en forma de L con un árbol y un cofre (cuerda, cubo de lava, hielo, hueso,
+  caña de azúcar, champiñones, semillas de calabaza, rodaja de sandía y un cactus). A 60 bloques al este hay una
+  isla de arena con un cactus y otro cofre (obsidiana, semillas de sandía y arena). Todo lo demás es vacío.
+  El Nether es el normal.
+
 ## Multijugador online (P2P)
 
 No hace falta subir el juego a ninguna web: cada jugador abre su copia de `index.html` (doble clic o

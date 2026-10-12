@@ -318,7 +318,7 @@
   let swingT = 1;
   let lastSpace = 0, lastW = 0, stepDist = 0;
 
-  const SCREENS = { join: 'join', packs: 'packs', controls: 'controls', menu: 'menu', newworld: 'newworld', options: 'options', loading: 'loading', ready: 'ready', paused: 'pause', inventory: 'inventory', dead: 'death' };
+  const SCREENS = { minigames: 'minigames', join: 'join', packs: 'packs', controls: 'controls', menu: 'menu', newworld: 'newworld', options: 'options', loading: 'loading', ready: 'ready', paused: 'pause', inventory: 'inventory', dead: 'death' };
   function setState(s) {
     state = s;
     for (const k in SCREENS) $(SCREENS[k]).classList.toggle('hidden', SCREENS[k] !== SCREENS[s]);
@@ -371,7 +371,7 @@
 
   // Each dimension has its own world (chunks, edits) and entity list.
   function makeDimension(dim, seed, edits) {
-    const world = new VC.World(seed, edits, { nether: dim === 'nether' });
+    const world = new VC.World(seed, edits, { nether: dim === 'nether', type: dim === 'overworld' ? game.worldType : null });
     world.onFall = (x, y, z, st) => game.entities.add(new VC.FallingBlock(world, x, y, z, st));
     world.onBreak = (x, y, z, st, drop) => {
       if (drop && !game.player.creative) {
@@ -401,6 +401,9 @@
   function startWorld(save) {
     closeWorld(false);
     save = migrateSave(save);
+    game.worldType = save.type || null;
+    const mini = game.worldType && VC.Minigames.TYPES[game.worldType];
+    game.saveKey = mini ? mini.saveKey : SAVE_KEY;
     game.dims = {};
     game.portals = save.portals || [];
     makeDimension('overworld', save.seed, save.edits);
@@ -459,6 +462,7 @@
     for (const [k, c] of game.containers) containers[k] = c.serialize();
     const data = {
       v: 3,
+      type: game.worldType || undefined,
       containers,
       ender: game.enderChest.serialize(),
       jukebox: Array.from(game.jukebox.entries()),
@@ -479,7 +483,7 @@
       guests: game.guests, // multiplayer guests' inventories and positions, by name
     };
     try {
-      localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+      localStorage.setItem(game.saveKey || SAVE_KEY, JSON.stringify(data));
     } catch (e) {
       console.warn('No se pudo guardar el mundo', e);
     }
@@ -2295,7 +2299,7 @@
     for (const [k, c] of game.containers) containers[k] = c.serialize();
     for (const [k, f] of game.furnaces) furnaces[k] = f.serialize();
     mp.room.send(from, {
-      t: 'welcome', id: from, name, seed: game.dims.overworld.world.seed,
+      t: 'welcome', id: from, name, seed: game.dims.overworld.world.seed, type: game.worldType,
       edits: game.dims.overworld.world.serializeEdits(),
       netherEdits: game.dims.nether ? game.dims.nether.world.serializeEdits() : undefined,
       time: game.time, rules: game.rules, difficulty: game.difficulty, spawn: game.spawn, portals: game.portals,
@@ -2319,7 +2323,7 @@
     mp.hostDim = m.hostDim;
     const you = m.you;
     const save = {
-      v: 3, seed: m.seed, edits: m.edits, netherEdits: m.netherEdits, time: m.time, rules: m.rules, difficulty: m.difficulty,
+      v: 3, type: m.type || undefined, seed: m.seed, edits: m.edits, netherEdits: m.netherEdits, time: m.time, rules: m.rules, difficulty: m.difficulty,
       spawn: (you && you.spawn) || m.spawn, portals: m.portals, containers: m.containers, furnaces: m.furnaces,
       mode: you ? you.mode : m.mode, dim: you ? you.dim : 'overworld',
       player: you ? { pos: you.pos, yaw: you.yaw, pitch: you.pitch, health: you.health, food: you.food, sat: you.sat, air: 15 } : { pos: m.spawn.slice(), yaw: 0, pitch: 0 },
@@ -2420,6 +2424,24 @@
       setState(reason ? 'join' : 'menu');
     }
   }
+
+  // ---------- Minigames ----------
+  function openMinigames() {
+    $('btn-sky-continue').disabled = !localStorage.getItem(VC.Minigames.TYPES.skyblock.saveKey);
+    setState('minigames');
+  }
+  $('btn-minigames').addEventListener('click', openMinigames);
+  $('btn-minigames-back').addEventListener('click', () => setState('menu'));
+  $('btn-sky-continue').addEventListener('click', () => {
+    const raw = localStorage.getItem(VC.Minigames.TYPES.skyblock.saveKey);
+    if (raw) startWorld(JSON.parse(raw));
+  });
+  $('btn-sky-new').addEventListener('click', () => {
+    const t = VC.Minigames.TYPES.skyblock;
+    localStorage.removeItem(t.saveKey);
+    startWorld(t.create((Math.random() * 2147483647) | 0));
+    saveWorld();
+  });
 
   $('btn-host').addEventListener('click', mpHost);
   $('btn-join').addEventListener('click', () => {

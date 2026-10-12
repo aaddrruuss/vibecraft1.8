@@ -35,11 +35,30 @@
   <div class="buttons">
     <button class="mc" id="btn-continue">Continuar mundo</button>
     <button class="mc" id="btn-new">Nuevo mundo</button>
+    <button class="mc" id="btn-minigames">Minijuegos...</button>
     <button class="mc" id="btn-join">Unirse a una sala...</button>
     <button class="mc" id="btn-options">Opciones...</button>
   </div>
   <div class="footer left">Vibecraft 1.8</div>
   <div class="footer right">Clon hecho a mano. No afiliado a Mojang.</div>
+</div>
+
+<div id="minigames" class="screen bg hidden">
+  <h2>Minijuegos</h2>
+  <div class="minigame-card">
+    <div class="mg-title">Skyblock</div>
+    <div class="mg-desc">Empiezas en una pequeña isla flotante en el vacío, con un árbol y un cofre.
+      Consigue todo lo demás con lo poco que tienes. ¡No te caigas!
+      Ábrelo online desde el menú del juego para jugarlo con amigos.</div>
+    <div class="buttons row">
+      <button class="mc half" id="btn-sky-continue">Continuar isla</button>
+      <button class="mc half" id="btn-sky-new">Nueva isla</button>
+    </div>
+  </div>
+  <p class="hint">Cada minijuego tiene su propia partida guardada: no borra tu mundo normal.</p>
+  <div class="buttons">
+    <button class="mc" id="btn-minigames-back">Volver</button>
+  </div>
 </div>
 
 <div id="join" class="screen bg hidden">
@@ -168,6 +187,7 @@
 <script src="js/models.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/chat.js"></script>
+<script src="js/minigames.js"></script>
 <script src="js/packs.js"></script>
 <script src="js/net.js"></script>
 <script src="js/main.js"></script>
