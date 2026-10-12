@@ -39,6 +39,7 @@ uniform vec2 uFogRange;
 uniform float uAlphaTest;
 uniform vec4 uTint;
 uniform float uAmbient;
+uniform float uAlpha;
 out vec4 outColor;
 void main() {
   vec4 t = texture(uTex, vUV);
@@ -48,7 +49,7 @@ void main() {
   L = max(L, vec3(uAmbient)) * vShade;
   vec3 c = mix(t.rgb * L, uTint.rgb, uTint.a);
   float f = clamp((vDist - uFogRange.x) / (uFogRange.y - uFogRange.x), 0.0, 1.0);
-  outColor = vec4(mix(c, uFog, f), t.a);
+  outColor = vec4(mix(c, uFog, f), t.a * uAlpha);
 }`;
 
   const FLAT_VS = `#version 300 es
@@ -109,7 +110,7 @@ void main() {
       if (!gl) throw new Error('Tu navegador no soporta WebGL2.');
       this.gl = gl;
       this.canvas = canvas;
-      this.chunk = this.program(CHUNK_VS, CHUNK_FS, ['uVP', 'uOffset', 'uCam', 'uTex', 'uDay', 'uFog', 'uFogRange', 'uAlphaTest', 'uTint', 'uAmbient']);
+      this.chunk = this.program(CHUNK_VS, CHUNK_FS, ['uVP', 'uOffset', 'uCam', 'uTex', 'uDay', 'uFog', 'uFogRange', 'uAlphaTest', 'uTint', 'uAmbient', 'uAlpha']);
       this.flat = this.program(FLAT_VS, FLAT_FS, ['uVP', 'uCam', 'uColor', 'uFog', 'uFogRange']);
       this.cloud = this.program(CLOUD_VS, CLOUD_FS, ['uVP', 'uTex', 'uOff', 'uColor', 'uCam', 'uFar']);
 
@@ -384,6 +385,7 @@ void main() {
       gl.uniform1f(ch.u.uAlphaTest, 0.5);
       gl.uniform4f(ch.u.uTint, 0, 0, 0, 0);
       gl.uniform1f(ch.u.uAmbient, s.nether ? 0.3 : 0.035);
+      gl.uniform1f(ch.u.uAlpha, 1);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, this.atlas);
       gl.enable(gl.CULL_FACE);
@@ -428,6 +430,17 @@ void main() {
         gl.uniform3f(ch.u.uOffset, c2.cx * 16, 0, c2.cz * 16);
         gl.bindVertexArray(m.vao);
         gl.drawElements(gl.TRIANGLES, m.count, gl.UNSIGNED_INT, 0);
+      }
+
+      // Translucent overlays (build previews, edit grids): blended, no depth writes.
+      if (s.overlays && s.overlays.length) {
+        gl.uniform2f(ch.u.uFogRange, 1e9, 2e9);
+        for (const b of s.overlays) {
+          gl.uniform1f(ch.u.uAlpha, b.alpha === undefined ? 0.5 : b.alpha);
+          this.drawBatch(b);
+        }
+        gl.uniform1f(ch.u.uAlpha, 1);
+        gl.uniform2f(ch.u.uFogRange, fogRange[0], fogRange[1]);
       }
 
       // Clouds

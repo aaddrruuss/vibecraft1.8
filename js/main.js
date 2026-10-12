@@ -60,10 +60,14 @@
     ['drop', 'Tirar objeto', 'KeyQ'], ['inventory', 'Inventario', 'KeyE'], ['chat', 'Abrir chat', 'KeyT'], ['command', 'Abrir comando', 'Slash'],
     ['perspective', 'Cambiar perspectiva', 'F5'], ['debug', 'Pantalla de depuración', 'F3'], ['hideHud', 'Ocultar HUD', 'F1'],
   ];
+  // Build minigame (Fortnite-style). These win over other actions on the same key while in that minigame.
+  ACTIONS.push(['build_wall', 'Construir: muro', 'KeyZ'], ['build_floor', 'Construir: suelo', 'KeyX'], ['build_ramp', 'Construir: rampa', 'KeyC'],
+    ['build_cone', 'Construir: cono', 'KeyV'], ['build_edit', 'Editar construcción', 'KeyG'], ['build_rotate', 'Rotar rampa', 'KeyR'],
+    ['build_mat', 'Cambiar material', 'KeyB']);
   for (let i = 1; i <= 9; i++) ACTIONS.push(['hotbar' + i, 'Casilla ' + i, 'Digit' + i]);
   const DEFAULT_KEYS = Object.fromEntries(ACTIONS.map(([a, , c]) => [a, c]));
   const stored = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
-  const settings = Object.assign({ renderDist: 8, fov: 70, sens: 100, invertY: false, volume: 80, name: 'Jugador' }, stored);
+  const settings = Object.assign({ renderDist: 8, fov: 70, sens: 100, invertY: false, volume: 80, name: 'Jugador', editOnRelease: true, turbo: true }, stored);
   settings.keys = Object.assign({}, DEFAULT_KEYS, stored.keys || {});
   VC.Sound.setVolume(settings.volume / 100);
   const saveSettings = () => localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
@@ -382,6 +386,10 @@
     world.onIgnite = (x, y, z) => igniteTNT(x, y, z, 0.5 + Math.random());
     world.onFizz = (x, y, z) => VC.Sound.fizz([x + 0.5, y + 0.5, z + 0.5]);
     world.onSet = (x, y, z, s) => mpBlockChanged(dim, x, y, z, s);
+    if (dim === 'overworld') {
+      world.extraBoxes = (x0, y0, z0, x1, y1, z1, out) => { if (game.build) game.build.collide(x0, y0, z0, x1, y1, z1, out); };
+      world.pieceAt = (pos) => (game.build ? game.build.at(pos) : null);
+    }
     game.dims[dim] = { world, entities: new VC.EntityManager(game) };
     return game.dims[dim];
   }
@@ -404,6 +412,9 @@
     game.worldType = save.type || null;
     const mini = game.worldType && VC.Minigames.TYPES[game.worldType];
     game.saveKey = mini ? mini.saveKey : SAVE_KEY;
+    game.build = mini && mini.buildBaseY !== undefined ? new VC.Build.World(mini.buildBaseY) : null;
+    if (game.build) game.build.load(save.build);
+    bm.mode = null; bm.edit = null; bm.rot = 0;
     game.dims = {};
     game.portals = save.portals || [];
     makeDimension('overworld', save.seed, save.edits);
@@ -481,6 +492,7 @@
       edits: game.dims.overworld.world.serializeEdits(),
       netherEdits: game.dims.nether ? game.dims.nether.world.serializeEdits() : undefined,
       guests: game.guests, // multiplayer guests' inventories and positions, by name
+      build: game.build ? game.build.serialize() : undefined,
     };
     try {
       localStorage.setItem(game.saveKey || SAVE_KEY, JSON.stringify(data));
@@ -1425,9 +1437,13 @@
     $('opt-vol-l').textContent = `Volumen: ${settings.volume}%`;
     $('opt-invert').textContent = `Invertir ratón: ${settings.invertY ? 'SÍ' : 'NO'}`;
     $('opt-name').value = settings.name || '';
+    $('opt-editrelease').textContent = `Construcción: editar al soltar: ${settings.editOnRelease ? 'SÍ' : 'NO'}`;
+    $('opt-turbo').textContent = `Construcción turbo: ${settings.turbo ? 'SÍ' : 'NO'}`;
   }
   $('opt-name').addEventListener('change', (e) => { settings.name = e.target.value.trim().slice(0, 16) || 'Jugador'; saveSettings(); });
   $('opt-name').addEventListener('keydown', (e) => e.stopPropagation());
+  $('opt-editrelease').addEventListener('click', () => { settings.editOnRelease = !settings.editOnRelease; refreshOptions(); saveSettings(); });
+  $('opt-turbo').addEventListener('click', () => { settings.turbo = !settings.turbo; refreshOptions(); saveSettings(); });
   $('opt-rd').addEventListener('input', (e) => { settings.renderDist = +e.target.value; refreshOptions(); saveSettings(); });
   $('opt-fov').addEventListener('input', (e) => { settings.fov = +e.target.value; refreshOptions(); saveSettings(); });
   $('opt-sens').addEventListener('input', (e) => { settings.sens = +e.target.value; refreshOptions(); saveSettings(); });
@@ -1662,6 +1678,319 @@
     closeWorld(true);
     setState('menu');
   });
+
+  // ---------- Build minigame (Fortnite-style building) ----------
+  // bm.mode: piece kind while in build mode (null = pickaxe). bm.edit: active edit session.
+  const bm = { mode: null, kind: 'wall', mat: 0, rot: 0, placeT: 0, hitT: 0, edit: null, prev: null };
+  const BT = VC.Build;
+  const buildActive = () => !!game.build && game.dim === 'overworld';
+  const pieceCenter = (pc) => { const a = game.build.aabb(pc); return [(a[0] + a[3]) / 2, (a[1] + a[4]) / 2, (a[2] + a[5]) / 2]; };
+
+  function buildEnter(kind) {
+    if (bm.edit) buildEditCancel();
+    bm.mode = kind; bm.kind = kind; bm.placeT = 0;
+    use = null;
+  }
+  function buildExit() { if (bm.edit) buildEditCancel(); bm.mode = null; }
+
+  // Input while in the build minigame. Returns true when the key was consumed.
+  function buildPress(acts) {
+    const has = (a) => acts.includes(a);
+    if (has('build_edit')) { buildEditKey(); return true; }
+    if (bm.edit) {
+      if (has('attack')) { mouse.left = true; buildEditMouse(); return true; }
+      if (has('use')) { buildEditReset(); return true; }
+      if (acts.some((a) => a.startsWith('hotbar'))) { buildEditCancel(); return false; }
+      return acts.every((a) => !['chat', 'command', 'perspective', 'debug', 'hideHud', 'forward', 'back', 'left', 'right', 'jump', 'sneak', 'sprint'].includes(a));
+    }
+    for (const k of BT.KINDS) if (has('build_' + k)) { buildEnter(k); return true; }
+    if (has('build_mat')) { bm.mat = (bm.mat + 1) % BT.MATS.length; return true; }
+    if (bm.mode) {
+      if (has('attack')) { mouse.left = true; bm.placeT = 0; buildTryPlace(); return true; }
+      if (has('use')) { bm.mat = (bm.mat + 1) % BT.MATS.length; return true; }
+      if (has('build_rotate')) { bm.rot = (bm.rot + 1) & 3; return true; }
+      if (acts.some((a) => a.startsWith('hotbar'))) { buildExit(); return false; }
+      return false;
+    }
+    if (has('attack')) {
+      mouse.left = true;
+      bm.hitT = 0.45;
+      if (buildPickaxe()) return true;
+      return false; // nothing built in front: normal attack (other players)
+    }
+    if (has('use')) return true; // no block placing in this minigame
+    return false;
+  }
+  function buildRelease(acts) {
+    if (acts.includes('attack') && bm.edit) bm.edit.drag = null;
+    if (acts.includes('build_edit') && bm.edit && settings.editOnRelease) buildEditConfirm();
+  }
+
+  function buildUpdate(dt) {
+    const p = game.player;
+    if (swingT < 1) swingT = Math.min(1, swingT + dt / 0.3);
+    // Turbo build: keep placing while the button is held.
+    if (bm.mode && mouse.left && settings.turbo && (bm.placeT -= dt) <= 0) buildTryPlace();
+    // Pickaxe: repeated hits while held.
+    if (!bm.mode && !bm.edit && mouse.left && (bm.hitT -= dt) <= 0) { bm.hitT = 0.45; buildPickaxe(); }
+    if (bm.edit) {
+      const ed = bm.edit, pc = game.build.get(ed.key);
+      if (!pc || Math.hypot(...pieceCenter(pc).map((v, i) => v - p.eye()[i])) > 9) { buildEditCancel(); return; }
+      ed.hover = game.build.tileAt(pc, p.eye(), p.forward());
+      if (ed.drag && ed.hover !== null) buildEditTile(ed.hover);
+    }
+  }
+
+  // ----- Placing -----
+  function buildTryPlace() {
+    bm.placeT = 0.05;
+    const p = game.player, B = game.build;
+    const spec = B.target(p, bm.mode, bm.rot);
+    if (B.get(BT.keyOf(spec)) || !B.supported(spec, game.world)) return false;
+    spec.m = bm.mat; spec.o = playerName(); spec.e = 0;
+    const pc = B.add(spec);
+    buildResolveOverlap(pc);
+    VC.Sound.place(BT.MATS[pc.m].sound, pieceCenter(pc));
+    swingT = 0;
+    mpSend({ t: 'bp', p: BT.World.pack(pc) });
+    return true;
+  }
+
+  // A piece placed on top of us lifts us onto it; a wall pushes us to one side.
+  function buildResolveOverlap(pc) {
+    const p = game.player;
+    if (!p || game.dim !== 'overworld') return;
+    const a = p.aabb();
+    let lift = 0, wall = null;
+    for (const b of game.build.boxes(pc)) {
+      if (a[3] <= b[0] || a[0] >= b[3] || a[4] <= b[1] || a[1] >= b[4] || a[5] <= b[2] || a[2] >= b[5]) continue;
+      if (pc.k === 'wall') wall = b; else lift = Math.max(lift, b[4]);
+    }
+    if (lift && lift - p.pos[1] < 4.2) { p.pos[1] = lift + 0.001; if (p.vel[1] < 0) p.vel[1] = 0; p.fallDist = 0; }
+    if (wall) {
+      const i = pc.a === 'x' ? 2 : 0, mid = (wall[i] + wall[i + 3]) / 2;
+      p.pos[i] = p.pos[i] < mid ? wall[i] - 0.31 : wall[i + 3] + 0.31;
+    }
+  }
+
+  // ----- Damage -----
+  function buildPickaxe() {
+    const p = game.player, e = p.eye(), f = p.forward();
+    const hit = game.build.raycast(e, f, 4.5);
+    if (!hit || mpRaycastPlayers(e, f, hit.t)) return false;
+    buildDamage(hit.piece, 50);
+    swingT = 0;
+    return true;
+  }
+  function buildDamage(pc, dmg) {
+    pc.dmg += dmg;
+    pc.hitT = performance.now() / 1000;
+    VC.Sound.hit(BT.MATS[pc.m].sound, pieceCenter(pc));
+    if (game.build.hp(pc) <= 0) mpSend({ t: 'bx', l: buildDestroy([pc.key]) });
+    else mpSend({ t: 'bd', k: pc.key, d: dmg });
+  }
+  game.onPieceHit = (pc, dmg) => { if (game.build && dmg > 0) buildDamage(pc, dmg); };
+  // Removes pieces plus everything left floating. Returns all removed keys.
+  function buildDestroy(keys) {
+    const B = game.build, out = [];
+    const kill = (k) => {
+      const pc = B.remove(k);
+      if (!pc) return;
+      out.push(k);
+      const c = pieceCenter(pc);
+      game.particle(c, 'smoke', 6);
+      VC.Sound.dig(BT.MATS[pc.m].sound, c);
+    };
+    for (const k of keys) kill(k);
+    for (const k of B.unsupported(game.dims.overworld.world)) kill(k);
+    if (bm.edit && !B.get(bm.edit.key)) bm.edit = null;
+    return out;
+  }
+  // Explosions damage nearby pieces (only where the explosion is simulated).
+  const buildBaseExplode = game.explode;
+  game.explode = (c, power, src, fire) => {
+    buildBaseExplode(c, power, src, fire);
+    if (!game.build || game.dim !== 'overworld') return;
+    const r = power * 2;
+    for (const pc of game.build.near(c[0] - r, c[1] - r, c[2] - r, c[0] + r, c[1] + r, c[2] + r)) {
+      const pcC = pieceCenter(pc), d = Math.hypot(pcC[0] - c[0], pcC[1] - c[1], pcC[2] - c[2]);
+      if (d < r && game.build.get(pc.key)) buildDamage(pc, Math.round(200 * (1 - d / r)));
+    }
+  };
+
+  // ----- Editing -----
+  function buildEditKey() {
+    if (bm.edit) { if (!settings.editOnRelease) buildEditConfirm(); return; }
+    const p = game.player, hit = game.build.raycast(p.eye(), p.forward(), 6, true);
+    if (!hit) return;
+    const pc = hit.piece;
+    if (pc.o && pc.o !== playerName()) { game.chat.info('Solo puedes editar tus propias construcciones'); return; }
+    bm.prev = bm.mode;
+    bm.mode = null;
+    bm.edit = { key: pc.key, sel: game.build.editSelection(pc), order: [], drag: null, hover: null };
+    VC.Sound.click();
+  }
+  function buildEditMouse() {
+    const ed = bm.edit, pc = game.build.get(ed.key);
+    if (!pc || ed.hover === null) return;
+    if (pc.k === 'ramp') { ed.order = []; ed.sel.clear(); ed.drag = 'add'; }
+    else ed.drag = ed.sel.has(ed.hover) ? 'remove' : 'add';
+    buildEditTile(ed.hover);
+  }
+  function buildEditTile(t) {
+    const ed = bm.edit, pc = game.build.get(ed.key);
+    if (!pc) return;
+    if (pc.k === 'ramp') { if (!ed.order.includes(t) && ed.order.length < 2) { ed.order.push(t); ed.sel.add(t); } return; }
+    if (ed.drag === 'add') ed.sel.add(t); else ed.sel.delete(t);
+  }
+  function buildSetEdit(pc, e, r) {
+    pc.e = e;
+    if (pc.k === 'ramp') pc.r = r;
+    pc.geo = null;
+    game.build.version++;
+  }
+  function buildEditConfirm() {
+    const ed = bm.edit, pc = ed && game.build.get(ed.key);
+    if (pc) {
+      const res = game.build.applyEdit(pc, ed.sel, ed.order);
+      if (res && (res.e !== pc.e || (pc.k === 'ramp' && res.r !== pc.r))) {
+        buildSetEdit(pc, res.e, res.r);
+        mpSend({ t: 'be', k: pc.key, e: res.e, r: res.r });
+        VC.Sound.place(BT.MATS[pc.m].sound, pieceCenter(pc));
+      }
+    }
+    bm.edit = null;
+    bm.mode = bm.prev;
+  }
+  function buildEditReset() {
+    const pc = game.build.get(bm.edit.key);
+    if (pc && pc.e) {
+      buildSetEdit(pc, 0, pc.r);
+      mpSend({ t: 'be', k: pc.key, e: 0, r: pc.r });
+      VC.Sound.place(BT.MATS[pc.m].sound, pieceCenter(pc));
+    }
+    bm.edit = null;
+    bm.mode = bm.prev;
+  }
+  function buildEditCancel() { bm.edit = null; }
+
+  // ----- Network -----
+  function buildNet(m) {
+    const B = game.build;
+    if (!B) return;
+    if (m.t === 'bp') { const pc = B.add(BT.World.unpack(m.p)); buildResolveOverlap(pc); VC.Sound.place(BT.MATS[pc.m].sound, pieceCenter(pc)); }
+    else if (m.t === 'be') { const pc = B.get(m.k); if (pc) buildSetEdit(pc, m.e, m.r); }
+    else if (m.t === 'bd') { const pc = B.get(m.k); if (pc) { pc.dmg += m.d; pc.hitT = performance.now() / 1000; VC.Sound.hit(BT.MATS[pc.m].sound, pieceCenter(pc)); } }
+    else if (m.t === 'bx') {
+      for (const k of m.l) {
+        const pc = B.remove(k);
+        if (pc) { const c = pieceCenter(pc); game.particle(c, 'smoke', 6); VC.Sound.dig(BT.MATS[pc.m].sound, c); }
+      }
+      if (bm.edit && !B.get(bm.edit.key)) bm.edit = null;
+    }
+  }
+
+  // ----- Rendering -----
+  const ghostBuf = VC.Models.makeBuf(), editBufA = VC.Models.makeBuf(), editBufB = VC.Models.makeBuf();
+  function bufAppend(b, data) {
+    const k = data.length / 8;
+    if ((b.n + k) * 8 > b.a.length) { const a = new Float32Array(Math.max(b.a.length * 2, (b.n + k) * 8)); a.set(b.a); b.a = a; }
+    b.a.set(data, b.n * 8);
+    b.n += k;
+  }
+  // Pieces go into the block batch; previews and edit grids are returned as translucent overlays.
+  function buildDraw(eye, blockRanges) {
+    const B = game.build, overlays = [];
+    if (!B || game.dim !== 'overworld') return overlays;
+    const t = performance.now() / 1000, R = settings.renderDist * 16, special = [];
+    const start = bufs.blocks.n;
+    for (const pc of B.pieces.values()) {
+      const c = pieceCenter(pc);
+      if ((c[0] - eye[0]) ** 2 + (c[2] - eye[2]) ** 2 > R * R) continue;
+      if (B.progress(pc) < 1 || (pc.hitT && t - pc.hitT < 0.12)) { special.push(pc); continue; }
+      bufAppend(bufs.blocks, BT.geometry(B, pc));
+    }
+    if (bufs.blocks.n > start) blockRanges.push({ start, count: bufs.blocks.n - start, tint: null });
+    for (const pc of special) {
+      const s = bufs.blocks.n;
+      bufAppend(bufs.blocks, BT.geometry(B, pc));
+      const flash = pc.hitT && t - pc.hitT < 0.12;
+      blockRanges.push({ start: s, count: bufs.blocks.n - s, tint: flash ? [1, 1, 1, 0.45] : [0.35, 0.7, 1, 0.6 * (1 - B.progress(pc))] });
+    }
+    const p = game.player;
+    // Holographic preview of the piece about to be placed.
+    if (bm.mode && state === 'playing') {
+      const spec = B.target(p, bm.mode, bm.rot);
+      spec.e = 0;
+      const ok = !B.get(BT.keyOf(spec)) && B.supported(spec, game.world);
+      ghostBuf.n = 0;
+      bufAppend(ghostBuf, BT.geometry(B, spec, { mat: bm.mat, light: [1, 1] }));
+      overlays.push({ tex: 'blocks', buf: ghostBuf, alpha: 0.45, ranges: [{ start: 0, count: ghostBuf.n, tint: ok ? [0.3, 0.65, 1, 0.65] : [1, 0.25, 0.25, 0.6] }] });
+    }
+    // Edit grid: every tile, selected ones highlighted.
+    if (bm.edit) {
+      const pc = B.get(bm.edit.key);
+      if (pc) {
+        const base = { overlay: true, all: true, sel: bm.edit.sel, light: [1, 1] };
+        editBufA.n = 0; editBufB.n = 0;
+        bufAppend(editBufA, BT.geometry(B, pc, Object.assign({ selected: false }, base)));
+        bufAppend(editBufB, BT.geometry(B, pc, Object.assign({ selected: true }, base)));
+        overlays.push({ tex: 'blocks', buf: editBufA, alpha: 0.28, ranges: [{ start: 0, count: editBufA.n, tint: [0.75, 0.9, 1, 0.35] }] });
+        overlays.push({ tex: 'blocks', buf: editBufB, alpha: 0.6, ranges: [{ start: 0, count: editBufB.n, tint: [0.15, 0.5, 1, 0.7] }] });
+      }
+    }
+    return overlays;
+  }
+
+  // ----- HUD -----
+  const buildIcons = (() => {
+    const icon = (draw) => {
+      const c = document.createElement('canvas');
+      c.width = c.height = 32;
+      const x = c.getContext('2d');
+      x.fillStyle = '#e8d2a8'; x.strokeStyle = '#5a3c1c'; x.lineWidth = 2;
+      draw(x);
+      return c.toDataURL();
+    };
+    return {
+      wall: icon((x) => { x.fillRect(6, 5, 20, 22); x.strokeRect(6, 5, 20, 22); x.beginPath(); x.moveTo(6, 16); x.lineTo(26, 16); x.moveTo(16, 5); x.lineTo(16, 27); x.stroke(); }),
+      floor: icon((x) => { x.beginPath(); x.moveTo(2, 20); x.lineTo(12, 12); x.lineTo(30, 12); x.lineTo(20, 20); x.closePath(); x.fill(); x.stroke(); }),
+      ramp: icon((x) => { x.beginPath(); x.moveTo(4, 27); x.lineTo(28, 27); x.lineTo(28, 6); x.closePath(); x.fill(); x.stroke(); }),
+      cone: icon((x) => { x.beginPath(); x.moveTo(3, 26); x.lineTo(16, 6); x.lineTo(29, 26); x.closePath(); x.fill(); x.stroke(); x.beginPath(); x.moveTo(16, 6); x.lineTo(16, 26); x.stroke(); }),
+    };
+  })();
+  let buildHudKey = '';
+  function updateBuildHud() {
+    const on = buildActive() && !hudHidden && ['playing', 'paused', 'chat', 'inventory'].includes(state);
+    $('buildbar').classList.toggle('hidden', !on);
+    $('build-info').classList.toggle('hidden', !on);
+    if (!on) return;
+    // Piece under the crosshair: material and health.
+    const p = game.player, hit = game.build.raycast(p.eye(), p.forward(), 8);
+    let info = '';
+    if (bm.edit) info = settings.editOnRelease ? `Editando · suelta ${keyName(settings.keys.build_edit)} para confirmar · clic der.: restablecer` : `Editando · ${keyName(settings.keys.build_edit)} para confirmar · clic der.: restablecer`;
+    else if (hit) { const pc = hit.piece; info = `${BT.KIND_NAMES[pc.k]} de ${BT.MATS[pc.m].name.toLowerCase()} · ${game.build.hp(pc)}/${game.build.maxHp(pc)}`; }
+    const key = [bm.mode, bm.mat, bm.rot, info, ...BT.KINDS.map((k) => settings.keys['build_' + k])].join('|');
+    if (key === buildHudKey) return;
+    buildHudKey = key;
+    const bar = $('buildbar');
+    bar.innerHTML = '';
+    for (const k of BT.KINDS) {
+      const d = document.createElement('div');
+      d.className = 'bslot' + (bm.mode === k ? ' sel' : '');
+      const img = document.createElement('img');
+      img.src = buildIcons[k];
+      const l = document.createElement('span');
+      l.textContent = keyName(settings.keys['build_' + k]);
+      d.append(img, l);
+      bar.appendChild(d);
+    }
+    const mat = document.createElement('div');
+    mat.className = 'bmat m' + bm.mat;
+    mat.textContent = `${BT.MATS[bm.mat].name} ∞`;
+    bar.appendChild(mat);
+    $('build-info').textContent = info;
+  }
 
   // ---------- Multiplayer (P2P rooms) ----------
   // The host owns the world: it simulates mobs, items, water, etc. and relays everything.
@@ -2242,6 +2571,10 @@
           if (q) q.ping = ms;
         }
         break;
+      case 'bp': case 'be': case 'bd': case 'bx':
+        buildNet(m);
+        if (mp.host) mp.room.broadcast(m, from);
+        break;
       case 'tpto': {
         if (!mp.host) break;
         const tp = Object.assign({}, m, { t: 'tp' });
@@ -2300,6 +2633,7 @@
     for (const [k, f] of game.furnaces) furnaces[k] = f.serialize();
     mp.room.send(from, {
       t: 'welcome', id: from, name, seed: game.dims.overworld.world.seed, type: game.worldType,
+      build: game.build ? game.build.serialize() : undefined,
       edits: game.dims.overworld.world.serializeEdits(),
       netherEdits: game.dims.nether ? game.dims.nether.world.serializeEdits() : undefined,
       time: game.time, rules: game.rules, difficulty: game.difficulty, spawn: game.spawn, portals: game.portals,
@@ -2323,7 +2657,7 @@
     mp.hostDim = m.hostDim;
     const you = m.you;
     const save = {
-      v: 3, type: m.type || undefined, seed: m.seed, edits: m.edits, netherEdits: m.netherEdits, time: m.time, rules: m.rules, difficulty: m.difficulty,
+      v: 3, type: m.type || undefined, build: m.build, seed: m.seed, edits: m.edits, netherEdits: m.netherEdits, time: m.time, rules: m.rules, difficulty: m.difficulty,
       spawn: (you && you.spawn) || m.spawn, portals: m.portals, containers: m.containers, furnaces: m.furnaces,
       mode: you ? you.mode : m.mode, dim: you ? you.dim : 'overworld',
       player: you ? { pos: you.pos, yaw: you.yaw, pitch: you.pitch, health: you.health, food: you.food, sat: you.sat, air: 15 } : { pos: m.spawn.slice(), yaw: 0, pitch: 0 },
@@ -2428,8 +2762,21 @@
   // ---------- Minigames ----------
   function openMinigames() {
     $('btn-sky-continue').disabled = !localStorage.getItem(VC.Minigames.TYPES.skyblock.saveKey);
+    $('btn-build-continue').disabled = !localStorage.getItem(VC.Minigames.TYPES.build.saveKey);
     setState('minigames');
   }
+  for (const [id, type] of [['btn-build-continue', 'build']]) {
+    $(id).addEventListener('click', () => {
+      const raw = localStorage.getItem(VC.Minigames.TYPES[type].saveKey);
+      if (raw) startWorld(JSON.parse(raw));
+    });
+  }
+  $('btn-build-new').addEventListener('click', () => {
+    const t = VC.Minigames.TYPES.build;
+    localStorage.removeItem(t.saveKey);
+    startWorld(t.create((Math.random() * 2147483647) | 0));
+    saveWorld();
+  });
   $('btn-minigames').addEventListener('click', openMinigames);
   $('btn-minigames-back').addEventListener('click', () => setState('menu'));
   $('btn-sky-continue').addEventListener('click', () => {
@@ -2524,6 +2871,7 @@
   const SPECTATOR_ACTIONS = new Set(['forward', 'back', 'left', 'right', 'jump', 'sneak', 'sprint', 'attack', 'chat', 'command', 'perspective', 'debug', 'hideHud']);
   function pressAction(code, e) {
     const p = game.player, now = performance.now();
+    if (buildActive() && buildPress(actionsFor(code))) return;
     for (const a of actionsFor(code)) {
       if (p.spectator) {
         if (!SPECTATOR_ACTIONS.has(a)) continue;
@@ -2568,6 +2916,7 @@
   }
 
   function releaseAction(code) {
+    if (buildActive()) buildRelease(actionsFor(code));
     for (const a of actionsFor(code)) {
       if (a === 'attack') { mouse.left = false; mining.progress = 0; }
       if (a === 'use') { mouse.right = false; if (game.player) releaseUse(); }
@@ -2637,6 +2986,7 @@
       nameTimer = 1.5;
       return;
     }
+    if (buildActive() && (bm.mode || bm.edit)) { buildExit(); return; }
     selectSlot(p.sel + (e.deltaY > 0 ? 1 : -1));
   }, { passive: true });
 
@@ -2802,6 +3152,7 @@
       if (bufs.blocks.n > bStart) blockRanges.push({ start: bStart, count: bufs.blocks.n - bStart, tint: null });
     }
     const remoteSkins = mpDrawPlayers(w, ranges, blockRanges);
+    const overlays = buildDraw(eye, blockRanges);
     for (const e of game.entities.list) {
       if (e === spectating) continue;
       const dx = e.pos[0] - eye[0], dz = e.pos[2] - eye[2];
@@ -2869,7 +3220,7 @@
       hand = [{ tex: 'blocks', buf: bufs.handB }, { tex: 'items', buf: bufs.handI }, { tex: 'mobs', buf: bufs.handM }];
       if (game.skin) hand.push({ tex: 'skin', buf: bufs.handS });
     }
-    return { batches, crack, hand };
+    return { batches, crack, hand, overlays };
   }
 
   // ---------- Debug overlay ----------
@@ -3003,7 +3354,7 @@
     }
     mpTick(dt);
     if (state === 'playing' && !player.sleeping && !player.spectator) {
-      updateInteraction(dt);
+      if (buildActive()) buildUpdate(dt); else updateInteraction(dt);
       autosaveT += dt;
       if (autosaveT > 30) { autosaveT = 0; saveWorld(); }
     }
@@ -3014,12 +3365,12 @@
     }
     game.chat.tick();
 
-    target = state === 'playing' && !player.spectator ? pick() : null;
+    target = state === 'playing' && !player.spectator && !buildActive() ? pick() : null;
     if (spectating && (spectating.removed || spectating.dead)) spectating = null;
     const cam = cameraFor(player);
     VC.Sound.listener.pos = cam.eye;
     VC.Sound.listener.yaw = cam.yaw;
-    const { batches, crack, hand } = buildBatches(cam.eye, dt);
+    const { batches, crack, hand, overlays } = buildBatches(cam.eye, dt);
     renderer.render({
       world,
       eye: cam.eye,
@@ -3035,7 +3386,9 @@
       batches,
       crack,
       hand,
+      overlays,
     });
+    updateBuildHud();
 
     mpNametags();
     updatePlayerList(dt);
@@ -3068,6 +3421,8 @@
     },
     give(id, n = 1) { game.player.inventory.add(id, n); },
     harvest, breakAt, useBlock, pick, iconFor, changeDimension,
+    step, // advance one frame by hand (tests)
+    build: { bm, enter: buildEnter, exit: buildExit, place: buildTryPlace, editKey: buildEditKey, editTile: buildEditTile, confirm: buildEditConfirm, pickaxe: buildPickaxe },
   };
 
   setState('menu');

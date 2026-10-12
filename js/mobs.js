@@ -454,7 +454,9 @@ VC.Arrow = class {
     for (let s = 0; s < n; s++) {
       for (let i = 0; i < 3; i++) this.pos[i] += this.vel[i] * dt / n;
       const id = this.world.getBlock(Math.floor(this.pos[0]), Math.floor(this.pos[1]), Math.floor(this.pos[2]));
-      if (VC.BP.solid[id]) {
+      const piece = this.world.pieceAt ? this.world.pieceAt(this.pos) : null;
+      if (piece && game.onPieceHit) game.onPieceHit(piece, Math.ceil(Math.hypot(...this.vel) / 55 * 40));
+      if (VC.BP.solid[id] || piece) {
         for (let i = 0; i < 3; i++) this.pos[i] -= this.vel[i] * dt / n * 0.5;
         this.stuck = true; this.age = 0;
         VC.Sound.arrowHit(this.pos);
@@ -720,7 +722,7 @@ VC.Thrown = class {
       const prev = this.pos.slice();
       for (let i = 0; i < 3; i++) this.pos[i] += this.vel[i] * dt / n;
       const id = this.world.getBlock(Math.floor(this.pos[0]), Math.floor(this.pos[1]), Math.floor(this.pos[2]));
-      if (VC.BP.solid[id] || VC.BP.liquid[id]) { this.impact(game, null, prev); return; }
+      if (VC.BP.solid[id] || VC.BP.liquid[id] || (this.world.pieceAt && this.world.pieceAt(this.pos))) { this.impact(game, null, prev); return; }
       if (this.age > 0.1) {
         const hit = game.entityAt(this.pos, this.owner);
         if (hit) { this.impact(game, hit); return; }

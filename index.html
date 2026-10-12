@@ -11,6 +11,8 @@
 <div id="hud" class="hidden">
   <div id="nametags"></div>
   <div id="playerlist" class="hidden"></div>
+  <div id="buildbar" class="hidden"></div>
+  <div id="build-info" class="hidden"></div>
   <div id="crosshair"></div>
   <pre id="debug" class="hidden"></pre>
   <div id="hurt"></div>
@@ -55,6 +57,16 @@
       <button class="mc half" id="btn-sky-new">Nueva isla</button>
     </div>
   </div>
+  <div class="minigame-card">
+    <div class="mg-title">Construcción</div>
+    <div class="mg-desc">Una gran llanura para construir y editar al estilo battle royale: muros, suelos, rampas y conos de
+      madera, piedra o metal. Por defecto: Z muro · X suelo · C rampa · V cono · G editar · R rotar ·
+      clic derecho o B: material · 1-9 o rueda: pico. Las teclas se cambian en Controles.</div>
+    <div class="buttons row">
+      <button class="mc half" id="btn-build-continue">Continuar</button>
+      <button class="mc half" id="btn-build-new">Nuevo mapa</button>
+    </div>
+  </div>
   <p class="hint">Cada minijuego tiene su propia partida guardada: no borra tu mundo normal.</p>
   <div class="buttons">
     <button class="mc" id="btn-minigames-back">Volver</button>
@@ -96,6 +108,10 @@
   <div class="slider mc"><input type="range" id="opt-vol" min="0" max="100" step="1"><span id="opt-vol-l"></span></div>
   <button class="mc" id="opt-invert">Invertir ratón: NO</button>
   <input id="opt-name" class="mc" type="text" maxlength="16" placeholder="Nombre en multijugador" autocomplete="off" spellcheck="false">
+  <div class="buttons row">
+    <button class="mc half small2" id="opt-editrelease">Editar al soltar</button>
+    <button class="mc half small2" id="opt-turbo">Construcción turbo</button>
+  </div>
   <button class="mc" id="btn-controls">Controles...</button>
   <div class="buttons row">
     <button class="mc half" id="btn-skin">Elegir skin...</button>
@@ -188,6 +204,7 @@
 <script src="js/ui.js"></script>
 <script src="js/chat.js"></script>
 <script src="js/minigames.js"></script>
+<script src="js/build.js"></script>
 <script src="js/packs.js"></script>
 <script src="js/net.js"></script>
 <script src="js/main.js"></script>

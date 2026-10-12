@@ -74,8 +74,35 @@ VC.Minigames = (function () {
     return { v: 3, type: 'skyblock', seed, mode: 'survival', containers, spawn, player: { pos: spawn.slice(), yaw: Math.PI * 0.75, pitch: -0.3 } };
   }
 
+  // ---------- Construcción (Fortnite-style building) ----------
+  // A flat grass plain: ground top at y 64, so build level 0 starts at y 65.
+  const FLAT_TOP = 64;
+  class FlatGenerator {
+    constructor(seed) { this.seed = seed | 0; }
+    column() { return { h: FLAT_TOP, biome: VC.BIOME.PLAINS }; }
+    generate(ch) {
+      const Bk = ch.blocks;
+      for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) {
+        const c = (z << 4) | x;
+        Bk[c] = B.BEDROCK;
+        for (let y = 1; y < FLAT_TOP - 3; y++) Bk[(y << 8) | c] = B.STONE;
+        for (let y = FLAT_TOP - 3; y < FLAT_TOP; y++) Bk[(y << 8) | c] = B.DIRT;
+        Bk[(FLAT_TOP << 8) | c] = B.GRASS;
+      }
+    }
+  }
+  function newBuild(seed) {
+    const spawn = [2.5, FLAT_TOP + 1, 2.5];
+    return {
+      v: 3, type: 'build', seed, mode: 'survival', difficulty: 'peaceful', time: 6000, spawn,
+      rules: { doDaylightCycle: false, doMobSpawning: false, keepInventory: true, mobGriefing: false },
+      player: { pos: spawn.slice(), yaw: Math.PI, pitch: 0 },
+    };
+  }
+
   // World types by id: generator for the overworld + save slot + label.
   const TYPES = {
+    build: { name: 'Construcción', Generator: FlatGenerator, saveKey: 'vibecraft_save_build', create: newBuild, buildBaseY: FLAT_TOP + 1 },
     skyblock: { name: 'Skyblock', Generator: SkyblockGenerator, saveKey: 'vibecraft_save_skyblock', create: newSkyblock },
   };
   return { TYPES };

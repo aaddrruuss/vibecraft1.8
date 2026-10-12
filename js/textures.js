@@ -561,6 +561,44 @@ VC.Textures = (function () {
       p(x, y, mix([60, 0, 140], [200, 90, 255], (a + 1) / 2 * (0.7 + rnd() * 0.3)), 190);
     }));
 
+    // ---------- Build minigame materials ----------
+    // Wood: wide light planks with dark seams and staggered joints.
+    paint('build_wood', (p) => each((x, y) => {
+      const row = y >> 2, seam = (y & 3) === 3, joint = (x + row * 6) % 13 === 0;
+      let c = vary([201, 156, 98], 0.1);
+      if (seam || joint) c = vary([118, 80, 44], 0.1);
+      else if (rnd() < 0.1) c = mul(c, 0.88);
+      else if ((x + y * 3) % 7 === 0) c = mul(c, 1.06);
+      p(x, y, c);
+    }));
+    paint('build_wood_frame', (p) => each((x, y) => {
+      let c = vary([112, 74, 40], 0.12);
+      if ((x === 2 || x === 13) && (y === 2 || y === 13)) c = [70, 70, 74]; // nails
+      else if ((y + (x >> 2)) % 5 === 0) c = mul(c, 0.85);
+      p(x, y, c);
+    }));
+    // Stone: irregular grey blocks with dark mortar.
+    paint('build_stone', (p) => each((x, y) => {
+      const row = Math.floor(y / 5), off = row % 2 ? 4 : 0;
+      const mortar = y % 5 === 4 || (x + off) % 8 === 7;
+      const shade = 0.88 + (((x + off) >> 3) * 37 + row * 53) % 5 * 0.04;
+      p(x, y, mortar ? vary([82, 82, 88], 0.1) : vary(mul([158, 158, 164], shade), 0.08));
+    }));
+    paint('build_stone_frame', (p) => each((x, y) => p(x, y, vary(rnd() < 0.15 ? [86, 86, 92] : [112, 112, 120], 0.1))));
+    // Metal: corrugated sheet with rivets.
+    paint('build_metal', (p) => each((x, y) => {
+      const rib = [0.78, 0.95, 1.08, 0.95][x & 3];
+      let c = vary(mul([168, 176, 186], rib), 0.03);
+      if ((y === 1 || y === 14) && (x & 3) === 2) c = [96, 100, 108];
+      p(x, y, c);
+    }));
+    paint('build_metal_frame', (p) => each((x, y) => {
+      let c = vary([84, 90, 98], 0.06);
+      if ((x === 2 || x === 13) && (y === 2 || y === 13)) c = [150, 156, 164];
+      p(x, y, c);
+    }));
+    paint('build_white', (p) => each((x, y) => p(x, y, (x === 0 || y === 0 || x === 15 || y === 15) ? [255, 255, 255] : [210, 235, 255])));
+
     // ---------- Breaking stages ----------
     const cracks = [];
     for (const [sx, sy] of [[8, 8], [8, 8], [3, 4], [12, 12], [12, 3], [4, 12]]) {

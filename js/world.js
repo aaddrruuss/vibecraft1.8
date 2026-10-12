@@ -438,6 +438,8 @@ VC.World = class {
           const bs = VC.Shapes.collision(s, (dx, dy, dz) => this.getBlock(x + dx, y + dy, z + dz));
           if (bs) for (const b of bs) out.push([x + b[0], y + b[1], z + b[2], x + b[3], y + b[4], z + b[5]]);
         }
+    // Non-voxel solids (build minigame pieces).
+    if (this.extraBoxes) this.extraBoxes(x0, y0, z0, x1, y1, z1, out);
     return out;
   }
 

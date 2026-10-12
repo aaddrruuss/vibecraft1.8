@@ -83,6 +83,19 @@ se puede jugar online igual que un mundo normal (Esc → Abrir sala online).
   caña de azúcar, champiñones, semillas de calabaza, rodaja de sandía y un cactus). A 60 bloques al este hay una
   isla de arena con un cactus y otro cofre (obsidiana, semillas de sandía y arena). Todo lo demás es vacío.
   El Nether es el normal.
+- **Construcción:** llanura infinita para construir y editar al estilo battle royale (siempre de día, sin monstruos).
+  - Piezas en una rejilla propia de 5×4 bloques: **muro (Z)**, **suelo (X)**, **rampa (C)** y **cono (V)**.
+    Clic izquierdo coloca (con *construcción turbo* basta con mantenerlo), clic derecho o **B** cambia de material
+    (madera 150 PV, piedra 300, metal 500; las piezas nacen con poca vida y se "llenan" mientras se construyen),
+    **R** rota la rampa, **1-9** o la rueda vuelven al pico.
+  - **Editar (G):** cuadrícula 3×3 en muros (puertas, ventanas, arcos…) y 2×2 en suelos, conos (levantar esquinas)
+    y rampas (arrastra de una casilla a otra para girarla). Con *editar al soltar* se confirma al soltar G; si no,
+    pulsando G otra vez. Clic derecho en edición = restablecer. Solo puedes editar tus propias piezas.
+  - El pico (clic sin estar construyendo) rompe piezas; flechas y explosiones también las dañan. Lo que queda sin
+    apoyo se derrumba. Online, todos ven y rompen las construcciones de todos.
+  - Opciones → *Editar al soltar* / *Construcción turbo*. Teclas en Opciones → Controles.
+  - Puedes cambiar el aspecto con un paquete de texturas: `textures/blocks/build_wood.png`, `build_wood_frame`,
+    `build_stone`, `build_stone_frame`, `build_metal`, `build_metal_frame`.
 
 ## Multijugador online (P2P)
 
