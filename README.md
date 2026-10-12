@@ -74,6 +74,29 @@ redstone (polvo, repetidores, comparadores, pistones, lámparas, sensores…), v
 reloj animados, caña de pescar, encantamientos, pociones con efectos, soporte de pociones, faro, cuadros, marcos,
 soportes de armadura, carteles (sin texto), correas y etiquetas.
 
+## Multijugador online (P2P)
+
+No hace falta subir el juego a ninguna web: cada jugador abre su copia de `index.html` (doble clic o
+`python serve.py`) y se conectan directamente entre sus PCs.
+
+- **Anfitrión:** entra en su mundo → Esc → **Abrir sala online**. Aparece un código de 6 letras (clic para copiarlo).
+- **Invitados:** menú principal → **Unirse a una sala...** → nombre + código → Conectar.
+
+El anfitrión guarda el mundo y lo simula para todos (mobs, agua, cultivos, hornos, objetos tirados); los
+invitados ven y editan el mismo mundo, pelean contra los mismos mobs, comparten cofres, chat y hora del día.
+El inventario y la posición de cada invitado se guardan en el mundo del anfitrión por su nombre. El nombre se
+cambia en Opciones. Cada jugador ve la skin de los demás si la eligió en Opciones.
+
+Cómo funciona: la conexión inicial se acuerda a través del servidor público y gratuito de PeerJS
+(`0.peerjs.com`) y servidores STUN de Google/Cloudflare; después todo el tráfico va directo entre los PCs
+(WebRTC). Se necesita internet y un navegador reciente. Notas:
+- El anfitrión debe tener el juego abierto (puede estar en otra pestaña o minimizado; si lo cierra, la sala se acaba).
+- En algunas redes (algunas universidades/empresas, 4G con CGNAT estricto) la conexión directa no es posible.
+- Todos deben usar la misma versión del juego. Los demás jugadores ven tu IP, como en cualquier conexión P2P.
+- Si un invitado está en otra dimensión que el anfitrión, sus mobs los simula su propio PC.
+- No se sincronizan: dormir para saltar la noche (solo el anfitrión), tocadiscos/bloques musicales, ni el cofre de Ender
+  (es de cada jugador).
+
 ## Paquetes de texturas
 
 **Opciones → Paquetes de texturas... → Añadir paquete...** y elige el `.zip` de un paquete de recursos de

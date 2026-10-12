@@ -104,7 +104,8 @@ VC.Mob = class extends VC.Entity {
     if (this.hurtTime > 0) this.hurtTime -= dt;
     if (this.attackCd > 0) this.attackCd -= dt;
     if (this.provoked > 0) this.provoked -= dt;
-    const d = this.def, p = game.player;
+    // Multiplayer: chase whichever player is closest.
+    const d = this.def, p = game.targetFor ? game.targetFor(this) : game.player;
 
     this.environment(dt, game);
     if (this.removed) return;
@@ -292,7 +293,7 @@ VC.Mob = class extends VC.Entity {
 
   // ---------- Flying mobs (ghast) ----------
   updateFlying(dt, game, dist3) {
-    const p = game.player, d = this.def;
+    const p = game.targetFor ? game.targetFor(this) : game.player, d = this.def;
     const targetable = !p.dead && !p.creative && !p.spectator;
     this.wanderT -= dt;
     if (!this.goal || this.wanderT <= 0 || this.hCollided) {
@@ -398,8 +399,10 @@ VC.ItemEntity = class extends VC.Entity {
     // Unstick if spawned inside a block.
     if (this.boxHasSolid(this.pos[0] - 0.1, this.pos[1] + 0.05, this.pos[2] - 0.1, this.pos[0] + 0.1, this.pos[1] + 0.2, this.pos[2] + 0.1)) this.pos[1] += dt * 4;
 
+    if (this.pickupDelay > 0) return;
+    if (game.netPickup && game.netPickup(this)) return; // picked up by another player
     const p = game.player;
-    if (!p.dead && !p.spectator && this.pickupDelay <= 0) {
+    if (!p.dead && !p.spectator) {
       const c = this.center(), pc = p.center();
       if (Math.abs(c[0] - pc[0]) < 1.3 && Math.abs(c[1] - pc[1]) < 1.6 && Math.abs(c[2] - pc[2]) < 1.3) {
         const left = p.inventory.add(this.stack.id, this.stack.count, this.stack.dmg);
@@ -475,13 +478,20 @@ VC.Arrow = class {
 
 // Owns all non-player entities: spawning, despawning, explosions, queries.
 VC.EntityManager = class {
+  static nextId = 0;
   constructor(game) {
     this.game = game;
     this.list = [];
     this.spawnT = 0;
   }
 
-  add(e) { this.list.push(e); return e; }
+  add(e) {
+    // Multiplayer guests forward most spawns to the host instead (netAdd returns false).
+    if (this.game.netAdd && !this.game.netAdd(e)) return e;
+    if (!e.netId) e.netId = ++VC.EntityManager.nextId;
+    this.list.push(e);
+    return e;
+  }
   mobs() { return this.list.filter((e) => e instanceof VC.Mob); }
 
   update(dt) {
@@ -498,7 +508,9 @@ VC.EntityManager = class {
         console.error(err);
         continue;
       }
-      const dx = e.pos[0] - p.pos[0], dz = e.pos[2] - p.pos[2];
+      if (e.netProxy) continue; // mirrored from the host, which decides when it goes away
+      const q = g.targetFor && e instanceof VC.Mob ? g.targetFor(e) : p;
+      const dx = e.pos[0] - q.pos[0], dz = e.pos[2] - q.pos[2];
       if (e instanceof VC.Mob && dx * dx + dz * dz > 100 * 100) e.removed = true;
       else if (e instanceof VC.Mob && e.def.hostile && dx * dx + dz * dz > 40 * 40 && Math.random() < dt / 30) e.removed = true;
       if (e.pos[1] < -64) e.removed = true;
@@ -517,8 +529,8 @@ VC.EntityManager = class {
   }
 
   trySpawn() {
-    const g = this.game, w = g.world, p = g.player;
-    if (!g.rules.doMobSpawning) return;
+    const g = this.game, w = g.world, p = g.spawnAnchor ? g.spawnAnchor() : g.player;
+    if (!g.rules.doMobSpawning || g.netNoSpawn) return;
     if (g.dim === 'nether') { this.trySpawnNether(); return; }
     let hostiles = 0, passives = 0;
     for (const e of this.list) if (e instanceof VC.Mob) { if (e.def.hostile) hostiles++; else passives++; }
@@ -527,7 +539,7 @@ VC.EntityManager = class {
       const a = Math.random() * Math.PI * 2, r = 24 + Math.random() * 32;
       const x = Math.floor(p.pos[0] + Math.cos(a) * r), z = Math.floor(p.pos[2] + Math.sin(a) * r);
       const ch = w.getChunk(x >> 4, z >> 4);
-      if (!ch || ch.dirty) continue;
+      if (!ch || !w.neighborsReady(x >> 4, z >> 4)) continue;
       let top = Math.min(VC.CH - 1, ch.top);
       while (top > 0 && !P.solid[w.getBlock(x, top, z)] && !P.liquid[w.getBlock(x, top, z)]) top--;
       const passive = Math.random() < 0.3;
@@ -556,14 +568,14 @@ VC.EntityManager = class {
   }
 
   trySpawnNether() {
-    const g = this.game, w = g.world, p = g.player, P = VC.BP;
+    const g = this.game, w = g.world, p = g.spawnAnchor ? g.spawnAnchor() : g.player, P = VC.BP;
     let pigmen = 0, ghasts = 0;
     for (const e of this.list) if (e instanceof VC.Mob) { if (e.type === 'pigman') pigmen++; if (e.type === 'ghast') ghasts++; }
     for (let attempt = 0; attempt < 4; attempt++) {
       const a = Math.random() * Math.PI * 2, r = 24 + Math.random() * 40;
       const x = Math.floor(p.pos[0] + Math.cos(a) * r), z = Math.floor(p.pos[2] + Math.sin(a) * r);
       const ch = w.getChunk(x >> 4, z >> 4);
-      if (!ch || ch.dirty) continue;
+      if (!ch || !w.neighborsReady(x >> 4, z >> 4)) continue;
       if (Math.random() < 0.12) {
         if (ghasts >= 3 || g.difficulty === 'peaceful') continue;
         const y = 45 + Math.floor(Math.random() * 50);
@@ -781,7 +793,7 @@ VC.Fireball = class {
       const hit = this.age > 0.2 ? game.entityAt(this.pos, this.owner) : null;
       if (VC.BP.solid[id] || hit) {
         this.removed = true;
-        if (hit === game.player) hit.hurt(6, this.pos, true, 'murió por una bola de fuego de Ghast', true);
+        if (hit) hit.hurt(6, this.pos, true, 'murió por una bola de fuego de Ghast', true);
         game.explode(this.pos, 1, this.owner, true);
         return;
       }

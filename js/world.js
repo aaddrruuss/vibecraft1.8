@@ -83,15 +83,23 @@ VC.World = class {
     if (y < 0 || y >= VC.CH) return [];
     const cx = x >> 4, cz = z >> 4, k = this.key(cx, cz);
     const ch = this.chunks.get(k);
-    if (!ch) return [];
     const i = (y << 8) | ((z & 15) << 4) | (x & 15);
+    let e = this.edits.get(k);
+    if (!ch) {
+      // Not loaded (multiplayer: someone else's area): keep the edit for when it generates.
+      if (!e) { e = new Map(); this.edits.set(k, e); }
+      if (e.get(i) === id) return [];
+      e.set(i, id);
+      if (this.onSet && !this.silent) this.onSet(x, y, z, id);
+      return [];
+    }
     const old = ch.blocks[i];
     if (old === id) return [];
     ch.blocks[i] = id;
     if (id && y > ch.top) ch.top = y;
-    let e = this.edits.get(k);
     if (!e) { e = new Map(); this.edits.set(k, e); }
     e.set(i, id);
+    if (this.onSet && !this.silent) this.onSet(x, y, z, id);
 
     const P = VC.BP;
     const lightChange = P.light[old] !== P.light[id];

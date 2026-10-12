@@ -9,6 +9,7 @@
 <canvas id="game"></canvas>
 
 <div id="hud" class="hidden">
+  <div id="nametags"></div>
   <div id="crosshair"></div>
   <pre id="debug" class="hidden"></pre>
   <div id="hurt"></div>
@@ -33,10 +34,24 @@
   <div class="buttons">
     <button class="mc" id="btn-continue">Continuar mundo</button>
     <button class="mc" id="btn-new">Nuevo mundo</button>
+    <button class="mc" id="btn-join">Unirse a una sala...</button>
     <button class="mc" id="btn-options">Opciones...</button>
   </div>
   <div class="footer left">Vibecraft 1.8</div>
   <div class="footer right">Clon hecho a mano. No afiliado a Mojang.</div>
+</div>
+
+<div id="join" class="screen bg hidden">
+  <h2>Unirse a una sala</h2>
+  <label for="join-name">Tu nombre</label>
+  <input id="join-name" class="mc" type="text" maxlength="16" autocomplete="off" spellcheck="false">
+  <label for="join-code">Código de sala</label>
+  <input id="join-code" class="mc" type="text" maxlength="12" autocomplete="off" spellcheck="false" placeholder="Ej: K7Q2MX">
+  <p class="hint" id="join-status">Pide el código al anfitrión (Menú del juego → Abrir sala online).</p>
+  <div class="buttons row">
+    <button class="mc half" id="btn-join-go">Conectar</button>
+    <button class="mc half" id="btn-join-cancel">Cancelar</button>
+  </div>
 </div>
 
 <div id="newworld" class="screen bg hidden">
@@ -60,6 +75,7 @@
   <div class="slider mc"><input type="range" id="opt-sens" min="10" max="200" step="1"><span id="opt-sens-l"></span></div>
   <div class="slider mc"><input type="range" id="opt-vol" min="0" max="100" step="1"><span id="opt-vol-l"></span></div>
   <button class="mc" id="opt-invert">Invertir ratón: NO</button>
+  <input id="opt-name" class="mc" type="text" maxlength="16" placeholder="Nombre en multijugador" autocomplete="off" spellcheck="false">
   <button class="mc" id="btn-controls">Controles...</button>
   <div class="buttons row">
     <button class="mc half" id="btn-skin">Elegir skin...</button>
@@ -110,9 +126,11 @@
   <div class="buttons">
     <button class="mc" id="btn-resume">Volver al juego</button>
     <button class="mc" id="btn-mode">Modo: Supervivencia</button>
+    <button class="mc" id="btn-host">Abrir sala online</button>
     <button class="mc" id="btn-pause-options">Opciones...</button>
     <button class="mc" id="btn-quit">Guardar y salir al título</button>
   </div>
+  <p class="hint" id="room-info"></p>
 </div>
 
 <div id="inventory" class="screen dim hidden"></div>
@@ -150,6 +168,7 @@
 <script src="js/ui.js"></script>
 <script src="js/chat.js"></script>
 <script src="js/packs.js"></script>
+<script src="js/net.js"></script>
 <script src="js/main.js"></script>
 </body>
 </html>

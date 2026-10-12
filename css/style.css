@@ -324,3 +324,13 @@ button.mc.half { width: 196px; }
 #hud.spectator #hotbar, #hud.spectator #stats, #hud.spectator #crosshair { display: none; }
 #portal-fx { position: absolute; inset: 0; opacity: 0; pointer-events: none;
   background: radial-gradient(ellipse at center, rgba(160, 60, 255, 0.35), rgba(90, 0, 160, 0.85)); }
+
+/* ---------- Multiplayer ---------- */
+#nametags { position: absolute; inset: 0; overflow: hidden; }
+.nametag {
+  position: absolute; transform: translate(-50%, -100%);
+  padding: 1px 5px; background: rgba(0, 0, 0, 0.35); color: #fff;
+  font-size: 14px; white-space: nowrap; text-shadow: none;
+}
+#room-info { user-select: text; cursor: pointer; min-height: 1em; }
+#room-info b { color: #ffff80; font-size: 18px; letter-spacing: 2px; }

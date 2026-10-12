@@ -63,7 +63,7 @@
   for (let i = 1; i <= 9; i++) ACTIONS.push(['hotbar' + i, 'Casilla ' + i, 'Digit' + i]);
   const DEFAULT_KEYS = Object.fromEntries(ACTIONS.map(([a, , c]) => [a, c]));
   const stored = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
-  const settings = Object.assign({ renderDist: 8, fov: 70, sens: 100, invertY: false, volume: 80 }, stored);
+  const settings = Object.assign({ renderDist: 8, fov: 70, sens: 100, invertY: false, volume: 80, name: 'Jugador' }, stored);
   settings.keys = Object.assign({}, DEFAULT_KEYS, stored.keys || {});
   VC.Sound.setVolume(settings.volume / 100);
   const saveSettings = () => localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
@@ -209,11 +209,15 @@
       VC.Sound.bow(from);
     },
 
+    // Players in a dimension (multiplayer adds the remote ones).
+    playersIn(dim) { return game.player && game.dim === dim ? [game.player] : []; },
+
     // Who does an arrow at pos hit?
     entityAt(pos, owner) {
-      const p = game.player;
       if (owner !== 'player') {
-        if (!p.creative && !p.spectator && !p.dead && Math.abs(pos[0] - p.pos[0]) < 0.4 && Math.abs(pos[2] - p.pos[2]) < 0.4 && pos[1] > p.pos[1] && pos[1] < p.pos[1] + 1.8) return p;
+        for (const p of game.playersIn(game.dim)) {
+          if (!p.creative && !p.spectator && !p.dead && Math.abs(pos[0] - p.pos[0]) < 0.4 && Math.abs(pos[2] - p.pos[2]) < 0.4 && pos[1] > p.pos[1] && pos[1] < p.pos[1] + 1.8) return p;
+        }
         return null;
       }
       for (const e of game.entities.list) {
@@ -263,7 +267,7 @@
         ent.vel[1] += imp * 8;
         ent.vel[2] += (center[2] - c[2]) / l * imp * 12;
       };
-      hurtAt(game.player, game.player.center());
+      for (const q of game.playersIn(game.dim)) hurtAt(q, q.center());
       for (const e of game.entities.list) if (e instanceof VC.Mob && e !== src && !(src && src.type === 'ghast' && e.type === 'ghast')) hurtAt(e, e.center());
       VC.Sound.explode(c);
       const pd = Math.hypot(game.player.pos[0] - c[0], game.player.pos[2] - c[2]);
@@ -311,7 +315,7 @@
   let swingT = 1;
   let lastSpace = 0, lastW = 0, stepDist = 0;
 
-  const SCREENS = { packs: 'packs', controls: 'controls', menu: 'menu', newworld: 'newworld', options: 'options', loading: 'loading', ready: 'ready', paused: 'pause', inventory: 'inventory', dead: 'death' };
+  const SCREENS = { join: 'join', packs: 'packs', controls: 'controls', menu: 'menu', newworld: 'newworld', options: 'options', loading: 'loading', ready: 'ready', paused: 'pause', inventory: 'inventory', dead: 'death' };
   function setState(s) {
     state = s;
     for (const k in SCREENS) $(SCREENS[k]).classList.toggle('hidden', SCREENS[k] !== SCREENS[s]);
@@ -374,6 +378,7 @@
     };
     world.onIgnite = (x, y, z) => igniteTNT(x, y, z, 0.5 + Math.random());
     world.onFizz = (x, y, z) => VC.Sound.fizz([x + 0.5, y + 0.5, z + 0.5]);
+    world.onSet = (x, y, z, s) => mpBlockChanged(dim, x, y, z, s);
     game.dims[dim] = { world, entities: new VC.EntityManager(game) };
     return game.dims[dim];
   }
@@ -410,6 +415,7 @@
     if (save.ender) game.enderChest.load(save.ender);
     game.jukebox = new Map(save.jukebox || []);
     game.notes = new Map(save.notes || []);
+    game.guests = save.guests || {};
     sleep = null;
 
     const mode = save.mode || (save.v ? 'survival' : 'creative');
@@ -442,7 +448,7 @@
   }
 
   function saveWorld() {
-    if (!game.world) return;
+    if (!game.world || mp.guest) return; // guests never overwrite their own single-player save
     const p = game.player;
     const furnaces = {};
     for (const [k, f] of game.furnaces) furnaces[k] = f.serialize();
@@ -467,6 +473,7 @@
       portals: game.portals,
       edits: game.dims.overworld.world.serializeEdits(),
       netherEdits: game.dims.nether ? game.dims.nether.world.serializeEdits() : undefined,
+      guests: game.guests, // multiplayer guests' inventories and positions, by name
     };
     try {
       localStorage.setItem(SAVE_KEY, JSON.stringify(data));
@@ -515,13 +522,25 @@
       if (!ch) { world.generateChunk(cx, cz); continue; }
       if (ch.dirty && d2 <= R2 && world.neighborsReady(cx, cz)) meshChunk(ch);
     }
+    // Host: keep the area around each guest generated so mobs, water, etc. run there too (not meshed).
+    const anchors = [[pcx, pcz, R + 3]];
+    if (mp.host) {
+      for (const r of mp.players.values()) {
+        if (!r.ready || r.st.d !== game.dim) continue;
+        const gx = Math.floor(r.pos[0] / 16), gz = Math.floor(r.pos[2] / 16);
+        anchors.push([gx, gz, 6]);
+        for (const [dx, dz] of spiral(4)) {
+          if (performance.now() > deadline) break;
+          if (!world.getChunk(gx + dx, gz + dz)) world.generateChunk(gx + dx, gz + dz);
+        }
+      }
+    }
     unloadTimer += dt;
     if (unloadTimer > 1) {
       unloadTimer = 0;
-      const lim = (R + 3) * (R + 3);
       for (const [k, ch] of world.chunks) {
-        const dx = ch.cx - pcx, dz = ch.cz - pcz;
-        if (dx * dx + dz * dz > lim) { renderer.free(ch); world.chunks.delete(k); }
+        const keep = anchors.some(([ax, az, r]) => (ch.cx - ax) ** 2 + (ch.cz - az) ** 2 <= r * r);
+        if (!keep) { renderer.free(ch); world.chunks.delete(k); }
       }
     }
   }
@@ -658,6 +677,7 @@
       if (drop) for (const s of c.slots) if (s) game.dropItem(at, s);
       game.containers.delete(k);
     }
+    if (f || c) mpSend({ t: 'cdel', k });
   }
 
   function containerAt(x, y, z, size, title, cols) {
@@ -1099,12 +1119,14 @@
   function useOnEntity(mob, s, it) {
     const p = game.player;
     if (s && mob.def.food && mob.def.food.includes(s.id) && mob.feed(game)) {
+      mpMobUse(mob, 'feed');
       consumeHeld();
       VC.Sound.eat();
       return true;
     }
     if (mob.type === 'sheep' && s && s.id === I.SHEARS && !mob.sheared) {
       mob.sheared = true;
+      mpMobUse(mob, 'shear');
       const n = 1 + Math.floor(Math.random() * 3);
       game.dropItem(mob.center(), VC.stack(VC.st(35, mob.color), n));
       VC.Sound.shear(mob.center());
@@ -1113,6 +1135,7 @@
     }
     if (mob.type === 'sheep' && it && it.dye !== undefined && !mob.sheared && mob.color !== it.dye) {
       mob.color = it.dye;
+      mpMobUse(mob, 'dye', it.dye);
       consumeHeld();
       return true;
     }
@@ -1285,7 +1308,7 @@
   // ---------- Death ----------
   function onDeath() {
     const p = game.player;
-    game.chat.print(`${PLAYER_NAME} ${p.lastCause}`);
+    mpSay(`${playerName()} ${p.lastCause}`);
     p.lastCause = 'murió';
     if (game.chat.open) closeChat();
     if (!p.creative && !game.rules.keepInventory) {
@@ -1304,7 +1327,8 @@
   }
 
   // ---------- Chat & commands ----------
-  const PLAYER_NAME = 'Jugador';
+  // In a room, guests use the name the host gave them (it may add a number to avoid repeats).
+  const playerName = () => (mp.guest && mp.myName) || (settings.name || 'Jugador').slice(0, 16);
 
   function setDifficulty(d) {
     game.difficulty = d;
@@ -1318,7 +1342,7 @@
   function applyEdits(list) {
     const chunks = new Set();
     for (const [x, y, z, id] of list) {
-      if (game.world.getBlock(x, y, z) === B.FURNACE) removeFurnace(x, y, z, false);
+      removeBlockData(x, y, z, false);
       for (const ch of game.world.setBlock(x, y, z, id)) chunks.add(ch);
     }
     for (const ch of chunks) if (ch.mesh || game.world.neighborsReady(ch.cx, ch.cz)) meshChunk(ch);
@@ -1342,7 +1366,8 @@
 
   game.ui = new VC.UI(game);
   game.chat = new VC.Chat(game, {
-    playerName: PLAYER_NAME,
+    get playerName() { return playerName(); },
+    say(text) { mpSay(`<${playerName()}> ${text}`); },
     closeChat,
     applyEdits,
     setDifficulty,
@@ -1366,7 +1391,10 @@
     $('opt-vol').value = settings.volume;
     $('opt-vol-l').textContent = `Volumen: ${settings.volume}%`;
     $('opt-invert').textContent = `Invertir ratón: ${settings.invertY ? 'SÍ' : 'NO'}`;
+    $('opt-name').value = settings.name || '';
   }
+  $('opt-name').addEventListener('change', (e) => { settings.name = e.target.value.trim().slice(0, 16) || 'Jugador'; saveSettings(); });
+  $('opt-name').addEventListener('keydown', (e) => e.stopPropagation());
   $('opt-rd').addEventListener('input', (e) => { settings.renderDist = +e.target.value; refreshOptions(); saveSettings(); });
   $('opt-fov').addEventListener('input', (e) => { settings.fov = +e.target.value; refreshOptions(); saveSettings(); });
   $('opt-sens').addEventListener('input', (e) => { settings.sens = +e.target.value; refreshOptions(); saveSettings(); });
@@ -1426,15 +1454,27 @@
 
   // ---------- Custom skin ----------
   // Priority: skin chosen in Options (stored in localStorage) > skin/skin.png next to index.html.
+  let localSkinH = 64, mySkinUrl = null; // mySkinUrl is sent to other players
   function applySkin(img, source) {
     try {
       if (img.width !== 64 || (img.height !== 64 && img.height !== 32)) throw new Error('La skin debe ser un PNG de 64x64 o 64x32');
       renderer.setTexture('skin', img);
       VC.Models.setSkinSize(img.height);
+      localSkinH = img.height;
+      mySkinUrl = img.src.startsWith('data:') ? img.src : null;
+      if (!mySkinUrl) {
+        try {
+          const c = document.createElement('canvas');
+          c.width = img.width; c.height = img.height;
+          c.getContext('2d').drawImage(img, 0, 0);
+          mySkinUrl = c.toDataURL();
+        } catch (e) { mySkinUrl = null; } // file:// pages can't read skin/skin.png back
+      }
       game.skin = true;
       $('skin-status').textContent = `Skin: ${source}`;
     } catch (e) {
       game.skin = false;
+      mySkinUrl = null;
       $('skin-status').textContent = 'Skin: Steve (' + e.message + ')';
     }
   }
@@ -1569,7 +1609,12 @@
     setMode(MODES[(MODES.indexOf(modeOf(p)) + 1) % 3]);
     setState('paused');
   });
-  $('btn-quit').addEventListener('click', () => { closeWorld(true); setState('menu'); });
+  $('btn-quit').addEventListener('click', () => {
+    if (mp.guest) { mpLeave(); return; }
+    mpLeave();
+    closeWorld(true);
+    setState('menu');
+  });
   $('ready').addEventListener('click', () => canvas.requestPointerLock());
   $('btn-respawn').addEventListener('click', () => {
     game.player.respawn(game.spawn);
@@ -1579,9 +1624,707 @@
   });
   $('btn-death-quit').addEventListener('click', () => {
     game.player.respawn(game.spawn);
+    if (mp.guest) { mpLeave(); return; }
+    mpLeave();
     closeWorld(true);
     setState('menu');
   });
+
+  // ---------- Multiplayer (P2P rooms) ----------
+  // The host owns the world: it simulates mobs, items, water, etc. and relays everything.
+  // Guests send their own actions (block edits, hits, spawns) and mirror the host's entities.
+  // A guest in another dimension than the host simulates that dimension itself.
+  const NET_VERSION = 1;
+  const mp = {
+    room: null, host: false, guest: false,
+    players: new Map(), // peer id -> Remote ('host' on guests)
+    outBlocks: [],
+    sim: true,          // guest: true when it simulates its own dimension
+    hostDim: 'overworld',
+    proxyDim: null,
+    stateT: 0, entT: 0, timeT: 0, pdT: 0, uiT: 0, furnT: 0,
+    lastUi: '',
+  };
+  game.guests = {};
+
+  // Another player, seen through the network. Quacks enough like VC.Player for mob AI.
+  class Remote {
+    constructor(id, name) {
+      this.id = id;
+      this.name = name;
+      this.ready = false;
+      this.pos = [0, -500, 0];
+      this.vel = [0, 0, 0];
+      this.st = { d: 'overworld' };
+      this.av = {
+        type: 'player', pos: [0, -500, 0], yaw: 0, bodyYaw: 0, headPitch: 0, limbSwing: 0, limbAmp: 0, age: 0,
+        dead: false, deathTime: 0, fuse: 0, swing: 0, sneaking: false, using: false, armor: [null, null, null, null],
+        elytra: false, wing: 0, tilt: 0, skin: false, center() { return [this.pos[0], this.pos[1] + 0.9, this.pos[2]]; },
+      };
+      this.buf = VC.Models.makeBuf();
+      this.tag = document.createElement('div');
+      this.tag.className = 'nametag';
+      this.tag.textContent = name;
+      $('nametags').appendChild(this.tag);
+    }
+    get dead() { return !!this.st.dd; }
+    get creative() { return this.st.m === 'creative'; }
+    get spectator() { return this.st.m === 'spectator'; }
+    get sneaking() { return !!this.st.sn; }
+    eyeHeight() { return this.sneaking ? 1.54 : 1.62; }
+    eye() { return [this.pos[0], this.pos[1] + this.eyeHeight(), this.pos[2]]; }
+    center() { return [this.pos[0], this.pos[1] + 0.9, this.pos[2]]; }
+    aabb() { const p = this.pos; return [p[0] - 0.3, p[1], p[2] - 0.3, p[0] + 0.3, p[1] + 1.8, p[2] + 0.3]; }
+    held() { return this.st.h ? VC.stack(this.st.h, 1) : null; }
+    // Damage dealt by the host's mobs / explosions is applied on the owner's machine.
+    hurt(amount, src, knock = true, cause, armorable) {
+      if (this.dead || this.creative || this.spectator || amount <= 0) return false;
+      mpSend({ t: 'hurt', a: amount, s: src || null, k: !!knock, c: typeof cause === 'string' ? cause : null, ar: armorable === undefined ? !!src : armorable }, this.id);
+      return true;
+    }
+    setSkin(url) {
+      if (!url) return;
+      const img = new Image();
+      img.onload = () => {
+        if (img.width !== 64 || (img.height !== 64 && img.height !== 32)) return;
+        renderer.setTexture('skin_' + this.id, img);
+        this.skinH = img.height;
+      };
+      img.src = url;
+    }
+    remove() { this.tag.remove(); }
+  }
+
+  // Sends to the host (guest) or to one peer / everybody (host).
+  function mpSend(msg, to) {
+    if (!mp.room) return;
+    if (mp.guest) mp.room.send(mp.hostLink, msg);
+    else if (to) mp.room.send(to, msg);
+    else mp.room.broadcast(msg);
+  }
+  const mpRemotesIn = (dim) => [...mp.players.values()].filter((r) => r.ready && r.st.d === dim);
+
+  function mpSay(line, cls) {
+    game.chat.print(line, cls);
+    if (!mp.room) return;
+    mpSend({ t: 'chat', m: line, c: cls || '' });
+  }
+  function mpInfo(line) { mpSay(line, 'sys'); }
+
+  // ----- Hooks used by the rest of the game -----
+  game.playersIn = (dim) => {
+    const out = game.player && game.dim === dim ? [game.player] : [];
+    if (mp.host) out.push(...mpRemotesIn(dim));
+    return out;
+  };
+  // Nearest player a mob should care about (survival players first).
+  game.targetFor = (mob) => {
+    if (!mp.host || !mp.players.size) return game.player;
+    let best = null, bd = Infinity, any = null, ad = Infinity;
+    for (const q of game.playersIn(game.dim)) {
+      const d = (q.pos[0] - mob.pos[0]) ** 2 + (q.pos[1] - mob.pos[1]) ** 2 + (q.pos[2] - mob.pos[2]) ** 2;
+      if (d < ad) { ad = d; any = q; }
+      if (!q.dead && !q.creative && !q.spectator && d < bd) { bd = d; best = q; }
+    }
+    return best || any || game.player;
+  };
+  game.spawnAnchor = () => {
+    const list = game.playersIn(game.dim);
+    return list[Math.floor(Math.random() * list.length)] || game.player;
+  };
+  // Host: items next to a guest go into the guest's inventory.
+  game.netPickup = (item) => {
+    if (!mp.host) return false;
+    const c = item.center();
+    for (const r of mpRemotesIn(game.dim)) {
+      if (r.dead || r.spectator || item.skipFor === r.id) continue;
+      const pc = r.center();
+      if (Math.abs(c[0] - pc[0]) < 1.3 && Math.abs(c[1] - pc[1]) < 1.6 && Math.abs(c[2] - pc[2]) < 1.3) {
+        mpSend({ t: 'give', s: [item.stack.id, item.stack.count, item.stack.dmg || 0] }, r.id);
+        item.removed = true;
+        return true;
+      }
+    }
+    return false;
+  };
+  // Guest mirroring the host: only its own projectiles stay local, other spawns go to the host.
+  game.netAdd = (e) => {
+    if (!mp.guest || mp.sim || e.netProxy) return true;
+    if (e instanceof VC.Thrown || (e instanceof VC.Arrow && e.owner === 'player') || (e instanceof VC.Firework && e.rider)) { e.local = true; return true; }
+    const spec = mpSpec(e);
+    if (spec) mpSend({ t: 'spawn', e: spec });
+    return false;
+  };
+  Object.defineProperty(game, 'netNoSpawn', { get: () => mp.guest && !mp.sim });
+
+  function mpSpec(e) {
+    const p = e.pos.map((v) => Math.round(v * 1000) / 1000);
+    if (e instanceof VC.ItemEntity) return { k: 'i', p: [p[0], p[1] + 0.125, p[2]], s: [e.stack.id, e.stack.count, e.stack.dmg || 0], v: e.vel, pd: e.pickupDelay };
+    if (e instanceof VC.Mob) return { k: 'm', ty: e.type, p, b: e.baby, c: e.color };
+    if (e instanceof VC.PrimedTNT) return { k: 'n', p: [p[0] - 0.5, p[1], p[2] - 0.5], f: e.fuse };
+    if (e instanceof VC.Firework) return { k: 'w', p };
+    return null;
+  }
+  function mpFromSpec(o, w) {
+    if (o.k === 'i') { const e = new VC.ItemEntity(w, o.p, VC.stack(o.s[0], o.s[1], o.s[2]), o.v); e.pickupDelay = o.pd || 0; return e; }
+    if (o.k === 'm' && VC.MOB_TYPES[o.ty]) { const e = new VC.Mob(w, o.ty, o.p[0], o.p[1], o.p[2]); if (o.b) e.setBaby(true); if (o.c !== undefined) e.color = o.c; return e; }
+    if (o.k === 'n') return new VC.PrimedTNT(w, o.p[0], o.p[1], o.p[2], o.f);
+    if (o.k === 'w') return new VC.Firework(w, o.p);
+    return null;
+  }
+
+  function mpMobUse(mob, kind, v) { if (mob.netProxy) mpSend({ t: 'mu', id: mob.netId, k: kind, v }); }
+
+  // Effects that only change what players see/hear are relayed as 'fx'.
+  const baseExplode = game.explode, baseBurst = game.fireworkBurst;
+  game.explode = (c, power, src, fire) => {
+    baseExplode(c, power, src, fire);
+    if (mp.room) mpSend({ t: 'fx', k: 'boom', p: c, w: power, d: game.dim });
+  };
+  game.fireworkBurst = (pos) => {
+    baseBurst(pos);
+    if (mp.room) mpSend({ t: 'fx', k: 'fw', p: pos, d: game.dim });
+  };
+  function mpFx(m) {
+    if (m.d !== game.dim) return;
+    if (m.k === 'fw') baseBurst(m.p);
+    if (m.k === 'boom') {
+      game.particle(m.p, 'smoke', 12);
+      VC.Sound.explode(m.p);
+      const pd = Math.hypot(game.player.pos[0] - m.p[0], game.player.pos[2] - m.p[2]);
+      game.flash = Math.max(game.flash, Math.max(0, 1 - pd / 16) * 0.8);
+    }
+  }
+
+  // ----- Blocks -----
+  function mpBlockChanged(dim, x, y, z, s) {
+    if (mp.room) mp.outBlocks.push([dim, x, y, z, s]);
+  }
+  // Applies block changes from the network. silent: don't echo them back.
+  function mpApplyBlocks(list, silent) {
+    const chunks = new Set();
+    for (const [d, x, y, z, s] of list) {
+      if (!game.dims[d]) makeDimension(d, game.dims.overworld.world.seed, null);
+      const w = game.dims[d].world;
+      w.silent = silent;
+      try { for (const ch of w.setBlock(x, y, z, s)) if (w === game.world) chunks.add(ch); } finally { w.silent = false; }
+    }
+    for (const ch of chunks) if (ch.mesh || game.world.neighborsReady(ch.cx, ch.cz)) meshChunk(ch);
+  }
+
+  // ----- Entity snapshots (host -> guests in the same dimension) -----
+  const r2 = (v) => Math.round(v * 100) / 100;
+  function mpSnap(e) {
+    const b = [e.netId, r2(e.pos[0]), r2(e.pos[1]), r2(e.pos[2])];
+    if (e instanceof VC.Mob) {
+      const f = (e.hurtTime > 0 ? 1 : 0) | (e.dead ? 2 : 0) | (e.baby ? 4 : 0) | (e.sheared ? 8 : 0) | (e.aiming ? 16 : 0) |
+        (e.burning ? 32 : 0) | (e.attacking ? 64 : 0) | (e.provoked > 0 ? 128 : 0);
+      return b.concat('m', e.type, r2(e.yaw), r2(e.bodyYaw), r2(e.headPitch), r2(e.limbSwing), r2(e.limbAmp), f, e.color | 0, r2(e.fuse), r2(e.deathTime), r2(e.grazing || 0));
+    }
+    if (e instanceof VC.ItemEntity) return b.concat('i', e.stack.id, e.stack.count, e.stack.dmg || 0);
+    if (e instanceof VC.Arrow) return b.concat('a', r2(e.yaw), r2(e.pitch));
+    if (e instanceof VC.Fireball) return b.concat('f');
+    if (e instanceof VC.Thrown) return b.concat('t', e.itemId);
+    if (e instanceof VC.Firework) return b.concat('w');
+    if (e instanceof VC.PrimedTNT) return b.concat('n', r2(e.fuse));
+    if (e instanceof VC.FallingBlock) return b.concat('b', e.state);
+    return null;
+  }
+  function mpSendEntities() {
+    for (const r of mpRemotesIn(game.dim)) {
+      const list = [];
+      for (const e of game.entities.list) {
+        if (e.removed || (e.pos[0] - r.pos[0]) ** 2 + (e.pos[2] - r.pos[2]) ** 2 > 96 * 96) continue;
+        const s = mpSnap(e);
+        if (s) list.push(s);
+      }
+      mpSend({ t: 'e', d: game.dim, l: list }, r.id);
+    }
+  }
+
+  const lerpAng = (a, b, k) => a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) * k;
+  // Guest-side stand-in for a host entity: just follows the snapshots.
+  function proxyUpdate(dt) {
+    const t = this.net;
+    this.age = (this.age || 0) + dt;
+    if (this.invuln > 0) this.invuln -= dt;
+    if (this.hurtTime > 0) this.hurtTime -= dt;
+    const k = Math.min(1, dt * 12);
+    const far = Math.abs(t.p[0] - this.pos[0]) + Math.abs(t.p[1] - this.pos[1]) + Math.abs(t.p[2] - this.pos[2]) > 8;
+    for (let i = 0; i < 3; i++) this.pos[i] = far ? t.p[i] : this.pos[i] + (t.p[i] - this.pos[i]) * k;
+    if (this instanceof VC.Mob) {
+      this.yaw = lerpAng(this.yaw, t.yaw, k); this.bodyYaw = lerpAng(this.bodyYaw, t.by, k);
+      this.headPitch += (t.hp - this.headPitch) * k;
+      this.limbSwing += (t.ls - this.limbSwing) * k; this.limbAmp += (t.la - this.limbAmp) * k;
+      if (this.dead) this.deathTime += dt;
+    }
+    if (this instanceof VC.Firework) game.fireworkTrail(this.pos);
+  }
+  function proxyHurt(amount, src) {
+    if (this.dead || this.invuln > 0) return false;
+    this.invuln = 0.5;
+    this.hurtTime = 0.4;
+    mpSend({ t: 'mh', id: this.netId, a: amount, s: src || null });
+    VC.Sound.mob(this.type, 'hurt', this.center());
+    return true;
+  }
+  function mpMakeProxy(a, w) {
+    const [id, x, y, z, k] = a;
+    let e = null;
+    if (k === 'm' && VC.MOB_TYPES[a[5]]) { e = new VC.Mob(w, a[5], x, y, z); e.hurt = proxyHurt; }
+    else if (k === 'i') e = new VC.ItemEntity(w, [x, y + 0.125, z], VC.stack(a[5], a[6], a[7]));
+    else if (k === 'a') e = new VC.Arrow(w, 'host', [x, y, z], [0, 0, 1], 0);
+    else if (k === 'f') e = new VC.Fireball(w, null, [x, y, z], [0, 0, 0]);
+    else if (k === 't') e = new VC.Thrown(w, 'host', a[5], 'snowball', [x, y, z], [0, 0, 0]);
+    else if (k === 'w') e = new VC.Firework(w, [x, y, z]);
+    else if (k === 'n') e = new VC.PrimedTNT(w, x - 0.5, y, z - 0.5, a[5]);
+    else if (k === 'b') e = new VC.FallingBlock(w, x - 0.5, y, z - 0.5, a[5]);
+    if (!e) return null;
+    e.netId = id;
+    e.netProxy = true;
+    e.update = proxyUpdate;
+    e.net = { p: [x, y, z] };
+    return e;
+  }
+  function mpApplyEntities(m) {
+    if (mp.sim || m.d !== game.dim) return;
+    const w = game.world, seen = new Set();
+    const byId = new Map();
+    for (const e of game.entities.list) if (e.netProxy) byId.set(e.netId, e);
+    for (const a of m.l) {
+      const [id, x, y, z, k] = a;
+      seen.add(id);
+      let e = byId.get(id);
+      if (!e) { e = mpMakeProxy(a, w); if (!e) continue; game.entities.list.push(e); }
+      e.net.p = [x, y, z];
+      if (k === 'm') {
+        const f = a[12];
+        Object.assign(e.net, { yaw: a[6], by: a[7], hp: a[8], ls: a[9], la: a[10] });
+        if ((f & 1) && e.hurtTime <= 0) { e.hurtTime = 0.4; if (e.invuln <= 0) VC.Sound.mob(e.type, 'hurt', e.center()); }
+        if ((f & 2) && !e.dead) { e.dead = true; VC.Sound.mob(e.type, 'death', e.center()); }
+        if (!!(f & 4) !== e.baby) e.setBaby(!!(f & 4));
+        e.sheared = !!(f & 8); e.aiming = !!(f & 16); e.burning = !!(f & 32); e.attacking = !!(f & 64);
+        e.provoked = f & 128 ? 40 : 0;
+        e.color = a[13]; e.fuse = a[14]; if (e.dead) e.deathTime = Math.max(e.deathTime, a[15]); e.grazing = a[16];
+      } else if (k === 'i') { e.stack = VC.stack(a[5], a[6], a[7]); }
+      else if (k === 'a') { e.yaw = a[5]; e.pitch = a[6]; }
+      else if (k === 'n') { e.fuse = a[5]; }
+    }
+    for (const e of game.entities.list) if (e.netProxy && !seen.has(e.netId)) e.removed = true;
+  }
+
+  // ----- Player state -----
+  function mpMyState() {
+    const p = game.player, a = avatar, s = p.held();
+    return {
+      d: game.dim, x: r2(p.pos[0]), y: r2(p.pos[1]), z: r2(p.pos[2]),
+      yaw: r2(a.yaw), by: r2(a.bodyYaw), hp: r2(a.headPitch), ls: r2(a.limbSwing), la: r2(a.limbAmp),
+      sw: r2(a.swing), sn: p.sneaking ? 1 : 0, us: a.using ? 1 : 0, h: s ? s.id : 0, ar: a.armor, el: a.elytra ? 1 : 0,
+      wi: r2(a.wing), ti: r2(a.tilt), dd: p.dead ? 1 : 0, sl: p.sleeping ? 1 : 0, m: modeOf(p),
+    };
+  }
+  function mpApplyState(r, st) {
+    r.st = st;
+    if (!r.ready || Math.hypot(st.x - r.pos[0], st.y - r.pos[1], st.z - r.pos[2]) > 16) r.pos = [st.x, st.y, st.z];
+    r.target = [st.x, st.y, st.z];
+    r.ready = true;
+  }
+
+  // Draws the other players (called from buildBatches). Returns extra skin batches.
+  function mpDrawPlayers(w, ranges, blockRanges) {
+    const out = [];
+    for (const r of mp.players.values()) {
+      if (!r.ready || r.st.d !== game.dim || r.spectator) continue;
+      const st = r.st, av = r.av;
+      if (r.target) for (let i = 0; i < 3; i++) r.pos[i] += (r.target[i] - r.pos[i]) * 0.3;
+      av.pos = r.pos.slice();
+      Object.assign(av, {
+        yaw: st.yaw, bodyYaw: st.by, headPitch: st.hp, limbSwing: st.ls, limbAmp: st.la, swing: st.sw, sneaking: !!st.sn,
+        using: !!st.us, armor: st.ar || [null, null, null, null], elytra: !!st.el, wing: st.wi || 0, tilt: st.ti || 0, dead: !!st.dd,
+      });
+      av.deathTime = av.dead ? (av.deathTime || 0) + 0.016 : 0;
+      av.skin = !!r.skinH;
+      const tint = av.dead ? [1, 0, 0, 0.45] : null;
+      if (r.skinH) {
+        r.buf.n = 0;
+        VC.Models.setSkinSize(r.skinH);
+        VC.Models.mob(r.buf, av, w);
+        VC.Models.setSkinSize(localSkinH);
+        out.push({ tex: 'skin_' + r.id, buf: r.buf, ranges: [{ start: 0, count: r.buf.n, tint }] });
+      }
+      const start = bufs.mobs.n;
+      if (!r.skinH) VC.Models.mob(bufs.mobs, av, w);
+      VC.Models.armor(bufs.mobs, av, w);
+      if (bufs.mobs.n > start) ranges.push({ start, count: bufs.mobs.n - start, tint });
+      if (st.h && !st.sl) {
+        const b0 = bufs.blocks.n;
+        VC.Models.heldItem(bufs.blocks, bufs.items, av, w, st.h);
+        if (bufs.blocks.n > b0) blockRanges.push({ start: b0, count: bufs.blocks.n - b0, tint: null });
+      }
+    }
+    return out;
+  }
+
+  // Name tags: project the head position with the renderer's camera matrix.
+  function mpNametags() {
+    if (!mp.players.size) return;
+    const m = renderer.vp, W = canvas.clientWidth, H = canvas.clientHeight;
+    for (const r of mp.players.values()) {
+      const vis = r.ready && r.st.d === game.dim && !r.spectator && !hudHidden;
+      let shown = false;
+      if (vis) {
+        const x = r.pos[0], y = r.pos[1] + (r.sneaking ? 2.05 : 2.2), z = r.pos[2];
+        const cx = m[0] * x + m[4] * y + m[8] * z + m[12], cy = m[1] * x + m[5] * y + m[9] * z + m[13];
+        const cw = m[3] * x + m[7] * y + m[11] * z + m[15];
+        const d = Math.hypot(x - game.player.pos[0], z - game.player.pos[2]);
+        if (cw > 0.1 && d < 64) {
+          r.tag.style.left = ((cx / cw) * 0.5 + 0.5) * W + 'px';
+          r.tag.style.top = (1 - ((cy / cw) * 0.5 + 0.5)) * H + 'px';
+          shown = true;
+        }
+      }
+      r.tag.style.display = shown ? '' : 'none';
+    }
+  }
+
+  // ----- Containers & furnaces (last write wins) -----
+  function mpOpenKey() {
+    const ui = game.ui;
+    if (ui.kind === 'chest' && ui.container && ui.container !== game.enderChest) {
+      for (const [k, c] of game.containers) if (c === ui.container) return ['c', k, c.serialize()];
+    }
+    if (ui.kind === 'furnace' && ui.furnace) {
+      for (const [k, f] of game.furnaces) if (f === ui.furnace) return ['f', k, f.serialize()];
+    }
+    return null;
+  }
+  function mpApplyContainer(m) {
+    if (m.t === 'c') {
+      let c = game.containers.get(m.k);
+      if (!c) { c = new VC.Inventory(m.v.length); game.containers.set(m.k, c); }
+      c.load(m.v);
+    } else {
+      const f = game.furnaces.get(m.k), n = VC.Furnace.load(m.v);
+      if (f) Object.assign(f, n); else game.furnaces.set(m.k, n);
+    }
+    if (game.ui.kind && state === 'inventory' && !game.ui.drag) game.ui.render();
+    const open = mpOpenKey();
+    if (open && open[1] === m.k) mp.lastUi = JSON.stringify(open);
+  }
+
+  // ----- Per-frame network work -----
+  function mpTick(dt) {
+    if (!mp.room || !game.player) return;
+    // Guests decide whether they mirror the host or simulate their own dimension.
+    if (mp.guest) {
+      const sim = game.dim !== mp.hostDim;
+      if (sim !== mp.sim || mp.proxyDim !== game.dim) {
+        mp.sim = sim;
+        mp.proxyDim = game.dim;
+        game.entities.list = game.entities.list.filter((e) => (sim ? !e.netProxy : e.local));
+      }
+    }
+    if (mp.outBlocks.length) {
+      mpSend(mp.guest ? { t: 'set', l: mp.outBlocks } : { t: 'b', l: mp.outBlocks });
+      mp.outBlocks = [];
+    }
+    if ((mp.stateT += dt) >= 0.05) {
+      mp.stateT = 0;
+      const st = mpMyState();
+      st.i = mp.guest ? mp.myId : 'host';
+      mpSend({ t: 'p', st });
+    }
+    if (mp.host && (mp.entT += dt) >= 0.1) { mp.entT = 0; mpSendEntities(); }
+    if (mp.host && (mp.timeT += dt) >= 1) {
+      mp.timeT = 0;
+      mpSend({ t: 'time', v: game.time, r: game.rules, df: game.difficulty, sp: game.spawn });
+    }
+    if (mp.host && (mp.furnT += dt) >= 3) {
+      mp.furnT = 0;
+      for (const [k, f] of game.furnaces) if (f.lit || f.input) mpSend({ t: 'f', k, v: f.serialize() });
+    }
+    if (mp.guest && (mp.pdT += dt) >= 5) { mp.pdT = 0; mpSend({ t: 'pd', v: mpMyData() }); }
+    // Open chest / furnace: send our edits.
+    if ((mp.uiT += dt) >= 0.2) {
+      mp.uiT = 0;
+      const open = state === 'inventory' ? mpOpenKey() : null;
+      const key = open ? JSON.stringify(open) : '';
+      if (open && key !== mp.lastUi) mpSend({ t: open[0], k: open[1], v: open[2] });
+      mp.lastUi = key;
+    }
+  }
+
+  // What the host stores for a guest between sessions.
+  function mpMyData() {
+    const p = game.player;
+    return {
+      pos: p.pos.map(r2), dim: game.dim, yaw: p.yaw, pitch: p.pitch, inv: p.inventory.serialize(), ender: game.enderChest.serialize(),
+      health: p.health, food: p.food, sat: p.sat, mode: modeOf(p), spawn: game.spawn,
+    };
+  }
+
+  // ----- Messages -----
+  function mpOnMessage(from, m) {
+    switch (m.t) {
+      // --- both directions ---
+      case 'chat':
+        game.chat.print(m.m, m.c);
+        if (mp.host) mp.room.broadcast(m, from);
+        break;
+      case 'fx':
+        mpFx(m);
+        if (mp.host) mp.room.broadcast(m, from);
+        break;
+      case 'c': case 'f':
+        mpApplyContainer(m);
+        if (mp.host) mp.room.broadcast(m, from);
+        break;
+      case 'cdel':
+        game.containers.delete(m.k); game.furnaces.delete(m.k);
+        if (mp.host) mp.room.broadcast(m, from);
+        break;
+      case 'p': {
+        if (mp.host) {
+          const g = mp.players.get(from);
+          if (!g) break;
+          m.st.i = from;
+          mpApplyState(g, m.st);
+          mp.room.broadcast(m, from);
+        } else {
+          const q = mp.players.get(m.st.i);
+          if (q) mpApplyState(q, m.st);
+          if (m.st.i === 'host') mp.hostDim = m.st.d;
+        }
+        break;
+      }
+      // --- guest -> host ---
+      case 'hello': mpHostHello(from, m); break;
+      case 'set':
+        if (mp.host) mpApplyBlocks(m.l, false); // re-broadcast through onSet
+        break;
+      case 'spawn': {
+        const g = mp.players.get(from);
+        if (!mp.host || !g || g.st.d !== game.dim) break;
+        const e = mpFromSpec(m.e, game.world);
+        if (e) game.entities.add(e);
+        break;
+      }
+      case 'mh': {
+        if (!mp.host) break;
+        const e = game.entities.list.find((q) => q.netId === m.id);
+        if (e && e.hurt) e.hurt(m.a, m.s, game);
+        break;
+      }
+      case 'mu': {
+        if (!mp.host) break;
+        const e = game.entities.list.find((q) => q.netId === m.id);
+        if (!e) break;
+        if (m.k === 'feed') e.feed(game);
+        else if (m.k === 'shear') e.sheared = true;
+        else if (m.k === 'dye') e.color = m.v;
+        break;
+      }
+      case 'pd': {
+        const g = mp.players.get(from);
+        if (mp.host && g) game.guests[g.name] = m.v;
+        break;
+      }
+      // --- host -> guest ---
+      case 'welcome': mpGuestWelcome(m); break;
+      case 'pinfo': {
+        if (m.i === mp.myId) break;
+        let q = mp.players.get(m.i);
+        if (!q) { q = new Remote(m.i, m.n); mp.players.set(m.i, q); }
+        q.setSkin(m.skin);
+        break;
+      }
+      case 'leave': {
+        const q = mp.players.get(m.i);
+        if (q) { q.remove(); mp.players.delete(m.i); }
+        break;
+      }
+      case 'b': mpApplyBlocks(m.l, true); break;
+      case 'e': mpApplyEntities(m); break;
+      case 'time':
+        game.time = m.v;
+        game.rules = m.r;
+        game.spawn = m.sp || game.spawn;
+        if (m.df !== game.difficulty) setDifficulty(m.df);
+        break;
+      case 'hurt': {
+        const p = game.player;
+        p.hurt(m.a, m.s, m.k, m.c || 'murió', m.ar);
+        break;
+      }
+      case 'give': {
+        const p = game.player;
+        const left = p.inventory.add(m.s[0], m.s[1], m.s[2]);
+        if (left < m.s[1]) game.onPickup();
+        if (left > 0) {
+          // Inventory full: drop it, but not straight back into our hands.
+          const it = new VC.ItemEntity(game.world, p.center(), VC.stack(m.s[0], left, m.s[2]), [0, 2, 0]);
+          it.pickupDelay = 5;
+          game.entities.add(it);
+        }
+        break;
+      }
+      case 'kick':
+        mpLeave(m.m || 'Desconectado por el anfitrión');
+        break;
+    }
+  }
+
+  // Host: a guest said hello -> send it the world.
+  function mpHostHello(from, m) {
+    if (m.v !== NET_VERSION) { mp.room.send(from, { t: 'kick', m: 'Versión del juego distinta a la del anfitrión' }); return; }
+    let name = String(m.name || 'Jugador').slice(0, 16).replace(/[<>]/g, '') || 'Jugador';
+    const taken = () => name === playerName() || [...mp.players.values()].some((q) => q.name === name);
+    for (let n = 2; taken(); n++) name = String(m.name).slice(0, 13) + n;
+    const g = new Remote(from, name);
+    g.skinUrl = m.skin || null;
+    g.setSkin(g.skinUrl);
+    mp.players.set(from, g);
+    const containers = {}, furnaces = {};
+    for (const [k, c] of game.containers) containers[k] = c.serialize();
+    for (const [k, f] of game.furnaces) furnaces[k] = f.serialize();
+    mp.room.send(from, {
+      t: 'welcome', id: from, name, seed: game.dims.overworld.world.seed,
+      edits: game.dims.overworld.world.serializeEdits(),
+      netherEdits: game.dims.nether ? game.dims.nether.world.serializeEdits() : undefined,
+      time: game.time, rules: game.rules, difficulty: game.difficulty, spawn: game.spawn, portals: game.portals,
+      containers, furnaces, mode: modeOf(game.player) === 'spectator' ? 'creative' : modeOf(game.player),
+      you: game.guests[name] || null, hostDim: game.dim,
+    });
+    // Introduce everybody to everybody.
+    mp.room.send(from, { t: 'pinfo', i: 'host', n: playerName(), skin: mySkinUrl });
+    for (const q of mp.players.values()) {
+      if (q === g) continue;
+      mp.room.send(from, { t: 'pinfo', i: q.id, n: q.name, skin: q.skinUrl });
+    }
+    mp.room.broadcast({ t: 'pinfo', i: from, n: name, skin: g.skinUrl }, from);
+    mpInfo(`${name} se ha unido a la partida`);
+  }
+
+  // Guest: the host's world arrived -> start playing it.
+  function mpGuestWelcome(m) {
+    mp.myId = m.id;
+    mp.myName = m.name;
+    mp.hostDim = m.hostDim;
+    const you = m.you;
+    const save = {
+      v: 3, seed: m.seed, edits: m.edits, netherEdits: m.netherEdits, time: m.time, rules: m.rules, difficulty: m.difficulty,
+      spawn: (you && you.spawn) || m.spawn, portals: m.portals, containers: m.containers, furnaces: m.furnaces,
+      mode: you ? you.mode : m.mode, dim: you ? you.dim : 'overworld',
+      player: you ? { pos: you.pos, yaw: you.yaw, pitch: you.pitch, health: you.health, food: you.food, sat: you.sat, air: 15 } : { pos: m.spawn.slice(), yaw: 0, pitch: 0 },
+      inv: you ? you.inv : null, ender: you ? you.ender : null,
+    };
+    const players = mp.players;
+    startWorld(save);
+    mp.players = players; // startWorld -> closeWorld must not forget who is here
+    if (m.name !== playerName()) game.chat.info(`Tu nombre en esta sala es ${m.name}`);
+    game.chat.info(`Conectado a la sala ${mp.room.code}`);
+  }
+
+  async function mpHost() {
+    if (mp.room || !game.world) return;
+    $('room-info').textContent = 'Abriendo sala...';
+    $('btn-host').disabled = true;
+    const room = new VC.Net.Room();
+    try {
+      await room.host();
+    } catch (e) {
+      $('room-info').textContent = 'No se pudo abrir la sala: ' + e.message;
+      $('btn-host').disabled = false;
+      return;
+    }
+    mp.room = room; mp.host = true; mp.guest = false;
+    room.onmessage = mpOnMessage;
+    room.onleave = (id) => {
+      const g = mp.players.get(id);
+      if (!g) return;
+      g.remove();
+      mp.players.delete(id);
+      room.broadcast({ t: 'leave', i: id });
+      mpInfo(`${g.name} ha abandonado la partida`);
+    };
+    room.onclose = () => {};
+    mpRoomInfo();
+    game.chat.info(`Sala abierta. Código: ${room.code}`);
+  }
+
+  function mpRoomInfo() {
+    const el = $('room-info');
+    $('btn-host').classList.toggle('hidden', !!mp.room);
+    $('btn-host').disabled = false;
+    $('btn-quit').textContent = mp.guest ? 'Salir de la sala' : 'Guardar y salir al título';
+    if (!mp.room) { el.textContent = ''; return; }
+    el.innerHTML = '';
+    const b = document.createElement('b');
+    b.textContent = mp.room.code;
+    el.append(mp.host ? 'Sala abierta · código ' : 'En la sala ', b, mp.host ? ' (clic para copiar)' : '');
+  }
+  $('room-info').addEventListener('click', () => { if (mp.room && navigator.clipboard) navigator.clipboard.writeText(mp.room.code).catch(() => {}); });
+
+  async function mpJoin() {
+    const name = $('join-name').value.trim().slice(0, 16) || 'Jugador';
+    const code = VC.Net.normCode($('join-code').value);
+    settings.name = name;
+    saveSettings();
+    const status = $('join-status');
+    if (!code) { status.textContent = 'Escribe el código de la sala.'; return; }
+    status.textContent = 'Conectando...';
+    $('btn-join-go').disabled = true;
+    const room = new VC.Net.Room();
+    try {
+      mp.hostLink = await room.join(code);
+    } catch (e) {
+      status.textContent = e.message;
+      $('btn-join-go').disabled = false;
+      return;
+    }
+    $('btn-join-go').disabled = false;
+    mp.room = room; mp.guest = true; mp.host = false; mp.sim = false; mp.proxyDim = null;
+    mp.players = new Map();
+    mpRoomInfo();
+    room.onmessage = mpOnMessage;
+    room.onclose = (reason) => mpLeave(reason || 'Se cerró la sala');
+    status.textContent = 'Descargando el mundo...';
+    room.send(mp.hostLink, { t: 'hello', v: NET_VERSION, name, skin: mySkinUrl });
+  }
+
+  // Leaves the room (and, for guests, the world). reason: shown on the join screen.
+  function mpLeave(reason) {
+    if (!mp.room) return;
+    const wasGuest = mp.guest, room = mp.room;
+    if (wasGuest) mpSend({ t: 'pd', v: mpMyData() });
+    mp.room = null;
+    setTimeout(() => room.close(), 200); // let the last message go out
+    for (const q of mp.players.values()) q.remove();
+    mp.players.clear();
+    mp.host = mp.guest = false;
+    mp.myName = null;
+    mp.sim = true;
+    mp.outBlocks = [];
+    mpRoomInfo();
+    if (wasGuest) {
+      if (game.world) closeWorld(false);
+      $('join-status').textContent = reason || '';
+      $('btn-join-go').disabled = false;
+      setState(reason ? 'join' : 'menu');
+    }
+  }
+
+  $('btn-host').addEventListener('click', mpHost);
+  $('btn-join').addEventListener('click', () => {
+    $('join-name').value = settings.name || '';
+    $('join-status').textContent = 'Pide el código al anfitrión (Menú del juego → Abrir sala online).';
+    setState('join');
+    $(settings.name ? 'join-code' : 'join-name').focus();
+  });
+  $('btn-join-go').addEventListener('click', mpJoin);
+  $('btn-join-cancel').addEventListener('click', () => setState('menu'));
+  for (const id of ['join-name', 'join-code']) $(id).addEventListener('keydown', (e) => { if (e.key === 'Enter') mpJoin(); });
+  window.addEventListener('beforeunload', () => { if (mp.room) mpLeave(); });
 
   // ---------- Input ----------
   document.addEventListener('pointerlockchange', () => {
@@ -1890,6 +2633,7 @@
       if (held && !game.player.sleeping) VC.Models.heldItem(bufs.blocks, bufs.items, avatar, w, held.id);
       if (bufs.blocks.n > bStart) blockRanges.push({ start: bStart, count: bufs.blocks.n - bStart, tint: null });
     }
+    const remoteSkins = mpDrawPlayers(w, ranges, blockRanges);
     for (const e of game.entities.list) {
       if (e === spectating) continue;
       const dx = e.pos[0] - eye[0], dz = e.pos[2] - eye[2];
@@ -1940,6 +2684,7 @@
       { tex: 'items', buf: bufs.items },
     ];
     if (game.skin && bufs.skin.n) batches.push({ tex: 'skin', buf: bufs.skin, ranges: [{ start: 0, count: bufs.skin.n, tint: skinTint }] });
+    batches.push(...remoteSkins);
     let crack = null;
     if (mining.progress > 0 && mouse.left && !game.player.creative) {
       VC.Models.crack(bufs.crack, mining.x, mining.y, mining.z, Math.min(9, Math.floor(mining.progress * 10)), w, target && target.box);
@@ -1995,6 +2740,17 @@
   let last = performance.now(), fpsN = 0, fpsT = 0, fps = 0, debugT = 0, autosaveT = 0, liquidT = 0, lavaT = 0, randT = 0, uiT = 0;
   function frame(now) {
     requestAnimationFrame(frame);
+    step(now);
+  }
+  // Browsers stop requestAnimationFrame in hidden tabs; in multiplayer the world must keep
+  // running (the host simulates it for everybody), so a worker timer drives it meanwhile.
+  try {
+    const src = 'setInterval(() => postMessage(0), 50);';
+    const timer = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+    timer.onmessage = () => { if (document.hidden && mp.room) step(performance.now()); };
+  } catch (e) { /* no workers: hidden tabs just pause */ }
+
+  function step(now) {
     let dt = (now - last) / 1000;
     last = now;
     if (dt > 0.1) dt = 0.1;
@@ -2021,7 +2777,8 @@
     game.day = VC.util.smoothstep(-0.2, 0.25, Math.sin(ang));
 
     const active = state === 'playing' || state === 'inventory' || state === 'chat';
-    if (active && chunkReady(player.pos[0], player.pos[2])) {
+    const ready = chunkReady(player.pos[0], player.pos[2]);
+    if (active && ready) {
       input.keys = player.sleeping ? {} : moveKeys();
       const hpBefore = player.health, wasInWater = player.inWater, velY = player.vel[1], wasGround = player.onGround;
       player.update(dt, input);
@@ -2033,28 +2790,40 @@
         stepDist = player.walkDist;
         if (player.onGround && !player.sneaking && below && !P.liquid[below]) VC.Sound.step(below, player.pos);
       }
+      updateSleep(dt);
+      updatePortal(dt);
+      if (player.dead && state !== 'dead') onDeath();
+    }
+    // In multiplayer the world keeps running while this player is paused or dead.
+    if (ready && (active || mp.room)) {
       game.entities.update(dt);
-      world.tickUpdates(400);
-      liquidT += dt;
-      if (liquidT >= 0.25) { liquidT = 0; world.tickLiquids(false, 3000); }
-      lavaT += dt;
-      if (lavaT >= 1.5) { lavaT = 0; world.tickLiquids(true, 2000); }
-      randT += dt;
-      if (randT >= 0.25) {
-        randT = 0;
-        const pcx = Math.floor(player.pos[0] / 16), pcz = Math.floor(player.pos[2] / 16);
-        for (const [dx, dz] of spiral(6)) world.randomTicks(pcx + dx, pcz + dz, 12, Math.random);
+      // Guests in the host's dimension only mirror it: the host runs water, crops, furnaces...
+      const authority = !mp.guest || mp.sim;
+      if (authority) {
+        world.tickUpdates(400);
+        liquidT += dt;
+        if (liquidT >= 0.25) { liquidT = 0; world.tickLiquids(false, 3000); }
+        lavaT += dt;
+        if (lavaT >= 1.5) { lavaT = 0; world.tickLiquids(true, 2000); }
+        randT += dt;
+        if (randT >= 0.25) {
+          randT = 0;
+          for (const q of game.playersIn(game.dim)) {
+            const pcx = Math.floor(q.pos[0] / 16), pcz = Math.floor(q.pos[2] / 16);
+            for (const [dx, dz] of spiral(6)) world.randomTicks(pcx + dx, pcz + dz, 12, Math.random);
+          }
+        }
+      } else {
+        world.waterQ.clear(); world.lavaQ.clear(); world.updateQ.clear();
       }
       for (const [k, f] of game.furnaces) {
         const was = f.lit;
         f.tick(dt);
-        if (was !== f.lit && k.startsWith('n:') === (game.dim === 'nether')) {
+        if (authority && was !== f.lit && k.startsWith('n:') === (game.dim === 'nether')) {
           const [fx, fy, fz] = k.replace('n:', '').split(',').map(Number), cur = world.getBlock(fx, fy, fz);
           if ((cur >> 4) === 61 || (cur >> 4) === 62) applyEdit(fx, fy, fz, VC.st(f.lit ? 62 : 61, cur & 15));
         }
       }
-      updateSleep(dt);
-      updatePortal(dt);
       for (const pt of game.particles) {
         pt.life -= dt;
         if (pt.grav) pt.vel[1] -= pt.grav * dt;
@@ -2063,15 +2832,15 @@
         if (!pt.drag) { pt.vel[0] *= 0.96; pt.vel[2] *= 0.96; }
       }
       game.particles = game.particles.filter((pt) => pt.life > 0);
-      if (player.dead && state !== 'dead') onDeath();
     }
+    mpTick(dt);
     if (state === 'playing' && !player.sleeping && !player.spectator) {
       updateInteraction(dt);
       autosaveT += dt;
       if (autosaveT > 30) { autosaveT = 0; saveWorld(); }
     }
     if (state === 'inventory' && game.ui.kind === 'furnace' && (uiT += dt) > 0.25 && !game.ui.drag) { uiT = 0; game.ui.render(); }
-    if (state !== 'paused' && state !== 'dead') {
+    if ((state !== 'paused' && state !== 'dead') || mp.room) {
       if (game.rules.doDaylightCycle) game.time += dt * 20;
       totalTime += dt;
     }
@@ -2100,6 +2869,7 @@
       hand,
     });
 
+    mpNametags();
     updateHotbar();
     updateStats();
     $('hurt').style.opacity = Math.max(0, player.hurtTime / 0.4) * 0.5;

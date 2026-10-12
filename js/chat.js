@@ -91,7 +91,11 @@ VC.Chat = class {
   }
 
   submit(text) {
-    if (text[0] !== '/') { this.print(`<${this.api.playerName}> ${text}`); return; }
+    if (text[0] !== '/') {
+      if (this.api.say) this.api.say(text); // multiplayer-aware
+      else this.print(`<${this.api.playerName}> ${text}`);
+      return;
+    }
     const args = text.slice(1).split(/\s+/);
     const name = args.shift().toLowerCase().replace(/^minecraft:/, '');
     const cmd = this.commands()[name];
