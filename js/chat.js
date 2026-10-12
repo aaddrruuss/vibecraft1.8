@@ -215,19 +215,45 @@ VC.Chat = class {
       this.info(`Hora establecida en ${Math.floor(g.time % 24000)}`);
     }, (i) => (i === 0 ? ['set', 'add', 'query'] : i === 1 ? ['day', 'noon', 'night', 'midnight', 'sunrise', 'sunset'] : []));
 
-    const tp = (a) => {
-      if (this.isSelf(a[0]) && a.length >= 4) a = a.slice(1);
-      const [x, y, z] = this.xyz(a, 0, false);
-      const p = g.player;
-      p.pos = [x, y, z];
-      p.vel = [0, 0, 0];
-      p.fallDist = 0;
-      if (a[3] !== undefined) p.yaw = -this.coord(a[3], -p.yaw * 180 / Math.PI) * Math.PI / 180;
-      if (a[4] !== undefined) p.pitch = -this.coord(a[4], -p.pitch * 180 / Math.PI) * Math.PI / 180;
-      this.info(`Teletransportado a ${x.toFixed(1)}, ${y.toFixed(1)}, ${z.toFixed(1)}`);
+    // Players by name: yourself (@s, @p or your name) or, in multiplayer, anyone in the room.
+    const who = (s) => {
+      if (this.isSelf(s)) return { self: true, name: api.playerName, pos: g.player.pos.slice(), dim: g.dim };
+      const q = api.findPlayer ? api.findPlayer(s) : null;
+      if (!q) throw new Error(`No se ha encontrado al jugador ${s}`);
+      return q;
     };
-    def('tp', '/tp <x> <y> <z> [yaw] [pitch]', 'Teletransporta (admite ~)', tp);
-    def('teleport', '/teleport <x> <y> <z>', 'Igual que /tp', tp);
+    const isCoord = (s) => s !== undefined && (s[0] === '~' || !isNaN(parseFloat(s)));
+    const tp = (a) => {
+      if (!a.length) throw new Error('Uso: /tp <jugador> [destino] o /tp [jugador] <x> <y> <z>');
+      // /tp <x> <y> <z> [yaw] [pitch] (yourself)
+      if (isCoord(a[0]) || (this.isSelf(a[0]) && a.length >= 4)) {
+        if (!isCoord(a[0])) a = a.slice(1);
+        const [x, y, z] = this.xyz(a, 0, false);
+        const p = g.player;
+        p.pos = [x, y, z];
+        p.vel = [0, 0, 0];
+        p.fallDist = 0;
+        if (a[3] !== undefined) p.yaw = -this.coord(a[3], -p.yaw * 180 / Math.PI) * Math.PI / 180;
+        if (a[4] !== undefined) p.pitch = -this.coord(a[4], -p.pitch * 180 / Math.PI) * Math.PI / 180;
+        this.info(`Teletransportado a ${x.toFixed(1)}, ${y.toFixed(1)}, ${z.toFixed(1)}`);
+        return;
+      }
+      let target, dest;
+      if (a.length === 1) { target = who('@s'); dest = who(a[0]); }
+      else if (a.length === 2) { target = who(a[0]); dest = who(a[1]); }
+      else if (a.length >= 4) {
+        target = who(a[0]);
+        const b = target.pos;
+        dest = { name: null, pos: [this.coord(a[1], b[0]), this.coord(a[2], b[1]), this.coord(a[3], b[2])], dim: target.dim };
+      } else throw new Error('Uso: /tp <jugador> [destino] o /tp [jugador] <x> <y> <z>');
+      const where = dest.name ? dest.name : dest.pos.map((v) => v.toFixed(1)).join(', ');
+      if (target.self) api.teleportSelf(dest.pos, dest.dim);
+      else api.teleportPlayer(target, dest.pos, dest.dim);
+      this.info(`${target.self ? api.playerName : target.name} teletransportado a ${where}`);
+    };
+    const tpComplete = (i) => (i <= 1 && api.playerNames ? ['@s', ...api.playerNames()] : []);
+    def('tp', '/tp <jugador> [destino] | /tp [jugador] <x> <y> <z>', 'Teletransporta (admite ~ y nombres de jugadores)', tp, tpComplete);
+    def('teleport', '/teleport <jugador|x y z> ...', 'Igual que /tp', tp, tpComplete);
 
     def('give', '/give [jugador] <objeto> [cantidad]', 'Da objetos', (a) => {
       if (this.isSelf(a[0]) || (a.length >= 2 && isNaN(+a[1]) && VC.MC_NAMES[String(a[1]).toLowerCase().replace(/^minecraft:/, '')] !== undefined)) a = a.slice(1);

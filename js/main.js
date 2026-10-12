@@ -1384,6 +1384,18 @@
   game.ui = new VC.UI(game);
   game.chat = new VC.Chat(game, {
     get playerName() { return playerName(); },
+    // Multiplayer helpers for /tp.
+    playerNames() { return [...mp.players.values()].map((r) => r.name); },
+    findPlayer(name) {
+      const r = [...mp.players.values()].find((q) => q.name.toLowerCase() === String(name).toLowerCase());
+      return r && r.ready ? { self: false, id: r.id, name: r.name, pos: r.pos.slice(), dim: r.st.d } : null;
+    },
+    teleportSelf(pos, dim) { mpTeleportSelf(pos, dim); },
+    teleportPlayer(t, pos, dim) {
+      const msg = { t: 'tp', p: pos, d: dim, by: playerName() };
+      if (mp.guest) mpSend(Object.assign(msg, { t: 'tpto', to: t.id })); // the host forwards it
+      else mpSend(msg, t.id);
+    },
     say(text) { mpSay(`<${playerName()}> ${text}`); },
     closeChat,
     applyEdits,
@@ -1659,7 +1671,8 @@
     sim: true,          // guest: true when it simulates its own dimension
     hostDim: 'overworld',
     proxyDim: null,
-    stateT: 0, entT: 0, timeT: 0, pdT: 0, uiT: 0, furnT: 0,
+    stateT: 0, entT: 0, timeT: 0, pdT: 0, uiT: 0, furnT: 0, pingT: 0,
+    myPing: null,       // guest: round trip to the host in ms
     lastUi: '',
   };
   game.guests = {};
@@ -1811,6 +1824,16 @@
     if (o.k === 'n') return new VC.PrimedTNT(w, o.p[0], o.p[1], o.p[2], o.f);
     if (o.k === 'w') return new VC.Firework(w, o.p);
     return null;
+  }
+
+  // Moves the local player (changing dimension if needed).
+  function mpTeleportSelf(pos, dim) {
+    const p = game.player;
+    if (!p) return;
+    if (dim && dim !== game.dim) { changeDimension(dim, pos.slice()); return; }
+    p.pos = pos.slice();
+    p.vel = [0, 0, 0];
+    p.fallDist = 0;
   }
 
   function mpMobUse(mob, kind, v) { if (mob.netProxy) mpSend({ t: 'mu', id: mob.netId, k: kind, v }); }
@@ -2085,6 +2108,16 @@
       for (const [k, f] of game.furnaces) if (f.lit || f.input) mpSend({ t: 'f', k, v: f.serialize() });
     }
     if (mp.guest && (mp.pdT += dt) >= 5) { mp.pdT = 0; mpSend({ t: 'pd', v: mpMyData() }); }
+    // Host measures each guest's round trip and shares the table (shown with TAB).
+    if (mp.host && (mp.pingT += dt) >= 2) {
+      mp.pingT = 0;
+      const l = {};
+      for (const r of mp.players.values()) {
+        mpSend({ t: 'ping', ts: performance.now() }, r.id);
+        if (r.ping !== undefined) l[r.id] = r.ping;
+      }
+      mpSend({ t: 'pings', l });
+    }
     // Open chest / furnace: send our edits.
     if ((mp.uiT += dt) >= 0.2) {
       mp.uiT = 0;
@@ -2192,6 +2225,30 @@
         game.spawn = m.sp || game.spawn;
         if (m.df !== game.difficulty) setDifficulty(m.df);
         break;
+      case 'ping': mpSend({ t: 'pong', ts: m.ts }); break;
+      case 'pong': {
+        const g = mp.players.get(from);
+        if (mp.host && g) g.ping = Math.round(performance.now() - m.ts);
+        break;
+      }
+      case 'pings':
+        for (const [id, ms] of Object.entries(m.l)) {
+          if (id === mp.myId) mp.myPing = ms;
+          const q = mp.players.get(id);
+          if (q) q.ping = ms;
+        }
+        break;
+      case 'tpto': {
+        if (!mp.host) break;
+        const tp = Object.assign({}, m, { t: 'tp' });
+        if (m.to === 'host') mpOnMessage(from, tp);
+        else mp.room.send(m.to, tp);
+        break;
+      }
+      case 'tp':
+        mpTeleportSelf(m.p, m.d);
+        if (m.by && m.by !== playerName()) game.chat.info(`${m.by} te ha teletransportado`);
+        break;
       case 'pvp': {
         if (!mp.host) break;
         const hit = Object.assign({}, m, { t: 'hurt' });
@@ -2271,7 +2328,7 @@
     const players = mp.players;
     startWorld(save);
     mp.players = players; // startWorld -> closeWorld must not forget who is here
-    if (m.name !== playerName()) game.chat.info(`Tu nombre en esta sala es ${m.name}`);
+    if (m.name !== (settings.name || 'Jugador').slice(0, 16)) game.chat.info(`Tu nombre en esta sala es ${m.name}`);
     game.chat.info(`Conectado a la sala ${mp.room.code}`);
   }
 
@@ -2376,6 +2433,43 @@
   for (const id of ['join-name', 'join-code']) $(id).addEventListener('keydown', (e) => { if (e.key === 'Enter') mpJoin(); });
   window.addEventListener('beforeunload', () => { if (mp.room) mpLeave(); });
 
+  // ---------- Player list (hold TAB) ----------
+  let listShown = false, listT = 0;
+  function pingCell(ms) {
+    if (ms === null || ms === undefined) return ['…', '#aaa'];
+    return [ms + ' ms', ms < 80 ? '#55ff55' : ms < 200 ? '#ffff55' : ms < 400 ? '#ffaa00' : '#ff5555'];
+  }
+  function renderPlayerList() {
+    const el = $('playerlist');
+    el.innerHTML = '';
+    const title = document.createElement('div');
+    title.className = 'pl-title';
+    title.textContent = mp.room ? `Sala ${mp.room.code} · ${mp.players.size + 1} jugador${mp.players.size ? 'es' : ''}` : 'Un jugador';
+    el.appendChild(title);
+    const rows = [];
+    const me = { name: playerName(), you: true, host: mp.host || !mp.room, ping: mp.guest ? mp.myPing : null };
+    rows.push(me);
+    for (const r of mp.players.values()) rows.push({ name: r.name, host: r.id === 'host', ping: r.id === 'host' ? null : r.ping });
+    rows.sort((a, b) => (b.host - a.host) || a.name.localeCompare(b.name));
+    for (const r of rows) {
+      const row = document.createElement('div');
+      row.className = 'pl-row' + (r.you ? ' you' : '');
+      const n = document.createElement('span');
+      n.textContent = r.name + (r.host && mp.room ? ' (anfitrión)' : '');
+      const pg = document.createElement('span');
+      pg.className = 'pl-ping';
+      if (r.host) { pg.textContent = mp.room ? '—' : ''; pg.style.color = '#aaa'; }
+      else { const [t, c] = pingCell(r.ping); pg.textContent = t; pg.style.color = c; }
+      row.append(n, pg);
+      el.appendChild(row);
+    }
+  }
+  function updatePlayerList(dt) {
+    const show = listShown && (state === 'playing' || state === 'paused') && !hudHidden;
+    $('playerlist').classList.toggle('hidden', !show);
+    if (show && (listT -= dt) <= 0) { listT = 0.25; renderPlayerList(); }
+  }
+
   // ---------- Input ----------
   document.addEventListener('pointerlockchange', () => {
     const locked = document.pointerLockElement === canvas;
@@ -2462,6 +2556,7 @@
   document.addEventListener('keydown', (e) => {
     if (rebinding) { e.preventDefault(); finishRebind(e.code === 'Escape' ? null : e.code); return; }
     if (['F1', 'F3', 'F5', 'Tab'].includes(e.code)) e.preventDefault();
+    if (e.code === 'Tab' && state === 'playing') { listShown = true; listT = 0; }
     if (state === 'inventory') {
       if (e.code === settings.keys.inventory || e.code === 'Escape') { closeContainer(); return; }
       for (let i = 1; i <= 9; i++) if (e.code === settings.keys['hotbar' + i]) { game.ui.hotkey(i - 1); return; }
@@ -2479,10 +2574,11 @@
   });
 
   document.addEventListener('keyup', (e) => {
+    if (e.code === 'Tab') listShown = false;
     rawDown.delete(e.code);
     releaseAction(e.code);
   });
-  window.addEventListener('blur', releaseAll);
+  window.addEventListener('blur', () => { releaseAll(); listShown = false; });
 
   document.addEventListener('mousemove', (e) => {
     if (state !== 'playing') return;
@@ -2920,6 +3016,7 @@
     });
 
     mpNametags();
+    updatePlayerList(dt);
     updateHotbar();
     updateStats();
     $('hurt').style.opacity = Math.max(0, player.hurtTime / 0.4) * 0.5;

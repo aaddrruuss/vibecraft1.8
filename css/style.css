@@ -334,3 +334,14 @@ button.mc.half { width: 196px; }
 }
 #room-info { user-select: text; cursor: pointer; min-height: 1em; }
 #room-info b { color: #ffff80; font-size: 18px; letter-spacing: 2px; }
+
+/* Player list (TAB) */
+#playerlist {
+  position: absolute; top: 40px; left: 50%; transform: translateX(-50%);
+  min-width: 300px; max-width: 90vw; padding: 4px; background: rgba(0, 0, 0, 0.55);
+  display: flex; flex-direction: column; gap: 2px; font-size: 15px; text-shadow: 2px 2px #3f3f3f;
+}
+#playerlist .pl-title { text-align: center; color: #ffff80; padding: 2px 6px 4px; }
+#playerlist .pl-row { display: flex; justify-content: space-between; gap: 24px; padding: 2px 8px; background: rgba(255, 255, 255, 0.08); }
+#playerlist .pl-row.you { background: rgba(255, 255, 255, 0.18); }
+#playerlist .pl-ping { min-width: 64px; text-align: right; }
