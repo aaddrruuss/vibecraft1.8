@@ -9,7 +9,14 @@ VC.Mesher = (function () {
   const pb = new Uint16Array(SX * SY * SZ);
   const pl = new Uint8Array(SX * SY * SZ);
   const pk = new Uint8Array(SX * SY * SZ);
-  const AO = [0.42, 0.62, 0.8, 1.0];
+  // Ambient occlusion per corner; scaled by the "smooth lighting" option (0 = flat).
+  const AO_BASE = [0.42, 0.62, 0.8, 1.0];
+  const AO = AO_BASE.slice();
+  let smooth = 1;
+  function setSmooth(level) {
+    smooth = level;
+    for (let i = 0; i < 4; i++) AO[i] = 1 - (1 - AO_BASE[i]) * level;
+  }
   const NT = VC.ATLAS_TILES, TS = 1 / NT, EPS = 0.0002;
   const VS = 8;
   const off = (x, y, z) => y * LAYER + z * SX + x;
@@ -128,7 +135,8 @@ VC.Mesher = (function () {
       const base = b.vn;
       for (let k = 0; k < 4; k++) {
         const U = k === 1 || k === 2 ? 1 : 0, V = k < 2 ? 1 : 0;
-        vert(b, x + q[k][0] + ox, y + q[k][1], z + q[k][2] + oz, u0 + (U ? TS - EPS : EPS), v0 + (V ? TS - EPS : EPS), 0.95, sky, blk);
+        const wave = shape === SH.fire ? 0 : q[k][1] ? 20 : 10; // top corners sway
+        vert(b, x + q[k][0] + ox, y + q[k][1], z + q[k][2] + oz, u0 + (U ? TS - EPS : EPS), v0 + (V ? TS - EPS : EPS), 0.95 + wave, sky, blk);
       }
       quadIdx(b, base, false, true);
     }
@@ -221,17 +229,18 @@ VC.Mesher = (function () {
               if (!o1) { ss += pl[a1]; sk += pk[a1]; cnt++; }
               if (!o2) { ss += pl[a2]; sk += pk[a2]; cnt++; }
               if (!o3 && !(o1 && o2)) { ss += pl[a3]; sk += pk[a3]; cnt++; }
-              lt[k] = curve(ss / cnt);
-              lb[k] = sk > 0 ? curve(sk / cnt) : 0;
+              if (smooth > 0) { lt[k] = curve(ss / cnt); lb[k] = sk > 0 ? curve(sk / cnt) : 0; }
+              else { lt[k] = SKYC[pl[q]]; lb[k] = CURVE[pk[q]]; }
             }
 
             const base = b.vn;
+            const flag = leaves ? 30 : isLiquid && f === 2 && !VC.isLava(s) ? 40 : 0;
             for (let k = 0; k < 4; k++) {
               const c = F.c[k];
               const vy = c[1] === 1 ? topH : 0;
               const [u, v] = uvOf(f, c[0], vy, c[2]);
               vert(b, x + c[0], y + vy, z + c[2], u0 + Math.min(TS - EPS, Math.max(EPS, u * TS)), v0 + Math.min(TS - EPS, Math.max(EPS, v * TS)),
-                F.shade * AO[ao[k]], lt[k], lb[k]);
+                F.shade * AO[ao[k]] + flag, lt[k], lb[k]);
             }
             quadIdx(b, base, ao[0] + ao[2] < ao[1] + ao[3], false);
           }
@@ -245,5 +254,5 @@ VC.Mesher = (function () {
     };
   }
 
-  return { build, uvOf, FACES };
+  return { build, uvOf, FACES, setSmooth };
 })();

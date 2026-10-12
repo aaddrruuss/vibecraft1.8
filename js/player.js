@@ -59,7 +59,7 @@ VC.Player = class extends VC.Entity {
   eyeHeight() { return this.sleeping ? 0.3 : this.sneaking ? 1.54 : 1.62; }
 
   eye() {
-    const bob = this.onGround && !this.flying ? Math.abs(Math.sin(this.walkDist * Math.PI * 0.6)) * 0.07 : 0;
+    const bob = this.onGround && !this.flying && !(VC.gfx && VC.gfx.bob === false) ? Math.abs(Math.sin(this.walkDist * Math.PI * 0.6)) * 0.07 : 0;
     return [this.pos[0], this.pos[1] + this.eyeHeight() + bob, this.pos[2]];
   }
 

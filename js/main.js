@@ -9,7 +9,10 @@
   const canvas = $('game');
   let renderer;
   try {
-    renderer = new VC.Renderer(canvas);
+    // Antialiasing can only be chosen when the WebGL context is created (Gráficos -> needs restart).
+    let early = {};
+    try { early = JSON.parse(localStorage.getItem('vibecraft_settings') || '{}'); } catch (e) { early = {}; }
+    renderer = new VC.Renderer(canvas, { antialias: !!(early.gfx && early.gfx.aa) });
   } catch (e) {
     $('menu').classList.add('hidden');
     $('error').classList.remove('hidden');
@@ -37,15 +40,18 @@
   document.body.style.setProperty('--dirt', `url(${VC.Textures.menuBackground(atlas)})`);
 
   // Swaps every atlas, icon and HUD glyph (t = VC.Packs.build result, or baseTex for none).
+  let curTex = baseTex;
   function applyTextures(t) {
-    atlas = t.atlas;
-    renderer.setAtlas(t.atlas);
+    curTex = t;
+    atlas = gfxAtlas(t.atlas);
+    renderer.setAtlas(atlas);
+    renderer.setFiltering(settings.gfx.mipmaps, settings.gfx.aniso);
     renderer.setTexture('items', t.items);
     renderer.setTexture('mobs', t.mobs);
     for (const k in icons) delete icons[k];
     Object.assign(icons, VC.ItemArt.icons(t.items));
     Object.assign(hudIcons, VC.ItemArt.hud(), t.hud || {});
-    document.body.style.setProperty('--dirt', `url(${VC.Textures.menuBackground(t.atlas)})`);
+    document.body.style.setProperty('--dirt', `url(${VC.Textures.menuBackground(atlas)})`);
     hotbarVersion = -1;
     statsKey = '';
     if (game.ui && state === 'inventory') game.ui.render();
@@ -63,11 +69,21 @@
   // Build minigame (Fortnite-style). These win over other actions on the same key while in that minigame.
   ACTIONS.push(['build_wall', 'Construir: muro', 'KeyZ'], ['build_floor', 'Construir: suelo', 'KeyX'], ['build_ramp', 'Construir: rampa', 'KeyC'],
     ['build_cone', 'Construir: cono', 'KeyV'], ['build_edit', 'Editar construcción', 'KeyG'], ['build_rotate', 'Rotar rampa', 'KeyR'],
-    ['build_mat', 'Cambiar material', 'KeyB']);
+    ['build_mat', 'Cambiar material', 'KeyB'], ['zoom', 'Zoom', 'KeyC']);
   for (let i = 1; i <= 9; i++) ACTIONS.push(['hotbar' + i, 'Casilla ' + i, 'Digit' + i]);
   const DEFAULT_KEYS = Object.fromEntries(ACTIONS.map(([a, , c]) => [a, c]));
   const stored = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
   const settings = Object.assign({ renderDist: 8, fov: 70, sens: 100, invertY: false, volume: 80, name: 'Jugador', editOnRelease: true, turbo: true }, stored);
+  // Graphics options (OptiFine-like "Gráficos..." screen).
+  const GFX_DEFAULTS = {
+    brightness: 0.5, smooth: 1, dynLights: 'fancy', fog: 'fancy', fogStart: 0.55, clouds: 'fancy', cloudHeight: 110,
+    sky: true, stars: true, sunMoon: true, leaves: 'fancy', betterGrass: false, clearWater: false, mipmaps: 0, aniso: 1, aa: false,
+    shadows: true, vignette: true, bob: true, dynFov: true, showFps: false,
+    animWater: true, particles: 'all', fpsLimit: 0, renderScale: 1, chunkSpeed: 'normal',
+    waving: true, waterWaves: true, colorLight: true,
+  };
+  settings.gfx = Object.assign({}, GFX_DEFAULTS, stored.gfx || {});
+  VC.gfx = settings.gfx;
   settings.keys = Object.assign({}, DEFAULT_KEYS, stored.keys || {});
   VC.Sound.setVolume(settings.volume / 100);
   const saveSettings = () => localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
@@ -148,6 +164,9 @@
         flame: ['particle_flame', 0.1, [0, 0.6, 0], 0.7, 0.3],
       }[kind];
       if (!conf) return;
+      const lvl = settings.gfx.particles;
+      if (lvl === 'minimal') return;
+      if (lvl === 'decreased') n = Math.ceil(n / 2);
       for (let i = 0; i < n && game.particles.length < 400; i++) {
         const j = conf[4];
         game.particles.push({
@@ -161,6 +180,8 @@
     // Free-form full-bright particle (fireworks) with its own drag, gravity and fade.
     spark(pos, vel, sprite, size, life, o = {}) {
       if (game.particles.length >= 1500) return;
+      const lvl = settings.gfx.particles;
+      if (sprite !== 'particle_flash' && (lvl === 'minimal' || (lvl === 'decreased' && Math.random() < 0.5))) return;
       game.particles.push({
         pos: pos.slice(), vel, life, max: life, sprite: VC.SPRITE_INDEX[sprite], size, bright: true,
         drag: o.drag || 0, grav: o.grav || 0, fade: o.fade !== false, twinkle: !!o.twinkle,
@@ -322,7 +343,7 @@
   let swingT = 1;
   let lastSpace = 0, lastW = 0, stepDist = 0;
 
-  const SCREENS = { minigames: 'minigames', join: 'join', packs: 'packs', controls: 'controls', menu: 'menu', newworld: 'newworld', options: 'options', loading: 'loading', ready: 'ready', paused: 'pause', inventory: 'inventory', dead: 'death' };
+  const SCREENS = { video: 'video', minigames: 'minigames', join: 'join', packs: 'packs', controls: 'controls', menu: 'menu', newworld: 'newworld', options: 'options', loading: 'loading', ready: 'ready', paused: 'pause', inventory: 'inventory', dead: 'death' };
   function setState(s) {
     state = s;
     for (const k in SCREENS) $(SCREENS[k]).classList.toggle('hidden', SCREENS[k] !== SCREENS[s]);
@@ -533,7 +554,7 @@
     const world = game.world, player = game.player;
     const pcx = Math.floor(player.pos[0] / 16), pcz = Math.floor(player.pos[2] / 16);
     const R = settings.renderDist, R2 = (R + 0.5) * (R + 0.5);
-    const deadline = performance.now() + (state === 'loading' ? 30 : 7);
+    const deadline = performance.now() + (state === 'loading' ? 30 : 7 * ({ slow: 0.5, fast: 2.5 }[settings.gfx.chunkSpeed] || 1));
     for (const [dx, dz, d2] of spiral(R + 1.5)) {
       if (performance.now() > deadline) break;
       const cx = pcx + dx, cz = pcz + dz;
@@ -1451,6 +1472,176 @@
   function openOptions(from) { optionsReturn = from; refreshOptions(); setState('options'); }
   $('opt-invert').addEventListener('click', () => { settings.invertY = !settings.invertY; refreshOptions(); saveSettings(); });
 
+  // ---------- Graphics (OptiFine-like video settings) ----------
+  const OFF_ON = [[false, 'NO'], [true, 'SÍ']];
+  const GFX_SPEC = [
+    ['Calidad'],
+    ['brightness', 'Brillo', [[0, 'Oscuro'], [0.25, 'Bajo'], [0.5, 'Normal'], [0.75, 'Alto'], [1, 'Brillante']]],
+    ['smooth', 'Iluminación suave', [[0, 'NO'], [0.5, 'Mínima'], [1, 'Máxima']]],
+    ['dynLights', 'Luces dinámicas', [['off', 'NO'], ['fast', 'Rápidas'], ['fancy', 'Elegantes']]],
+    ['fog', 'Niebla', [['fancy', 'Elegante'], ['off', 'NO']]],
+    ['fogStart', 'Inicio de niebla', [[0.2, '0.2'], [0.4, '0.4'], [0.55, '0.55'], [0.7, '0.7'], [0.8, '0.8']]],
+    ['clouds', 'Nubes', [['fancy', 'Elegantes (3D)'], ['fast', 'Rápidas'], ['off', 'NO']]],
+    ['cloudHeight', 'Altura de nubes', [[96, '96'], [110, '110'], [128, '128'], [160, '160'], [192, '192']]],
+    ['leaves', 'Hojas', [['fancy', 'Elegantes'], ['fast', 'Rápidas']]],
+    ['betterGrass', 'Mejor hierba', [[false, 'NO'], [true, 'Rápida']]],
+    ['clearWater', 'Agua clara', OFF_ON],
+    ['sky', 'Cielo', OFF_ON], ['stars', 'Estrellas', OFF_ON], ['sunMoon', 'Sol y luna', OFF_ON],
+    ['mipmaps', 'Niveles de mipmap', [[0, 'NO'], [1, '1'], [2, '2'], [3, '3'], [4, 'Máx.']]],
+    ['aniso', 'Filtro anisotrópico', [[1, 'NO'], [2, '2x'], [4, '4x'], [8, '8x'], [16, '16x']]],
+    ['aa', 'Suavizado (reiniciar)', OFF_ON],
+    ['Detalles'],
+    ['shadows', 'Sombras de entidades', OFF_ON], ['vignette', 'Viñeta', OFF_ON],
+    ['bob', 'Balanceo de cámara', OFF_ON], ['dynFov', 'FOV dinámico', OFF_ON], ['showFps', 'Mostrar FPS', OFF_ON],
+    ['Animaciones'],
+    ['animWater', 'Agua y lava animadas', OFF_ON],
+    ['particles', 'Partículas', [['all', 'Todas'], ['decreased', 'Reducidas'], ['minimal', 'Mínimas']]],
+    ['Rendimiento'],
+    ['fpsLimit', 'FPS máximos', [[0, 'VSync'], [30, '30'], [60, '60'], [120, '120'], [240, '240']]],
+    ['renderScale', 'Escala de resolución', [[0.5, '50%'], [0.75, '75%'], [1, '100%'], [1.5, '150%'], [2, '200%']]],
+    ['chunkSpeed', 'Carga de chunks', [['slow', 'Lenta'], ['normal', 'Normal'], ['fast', 'Rápida']]],
+    ['Shaders'],
+    ['waving', 'Plantas y hojas al viento', OFF_ON], ['waterWaves', 'Olas en el agua', OFF_ON], ['colorLight', 'Luz de color (amanecer/noche)', OFF_ON],
+  ];
+  function renderVideo() {
+    const list = $('video-list');
+    list.innerHTML = '';
+    let grid = null;
+    for (const [key, label, opts] of GFX_SPEC) {
+      if (!opts) {
+        const h = document.createElement('div');
+        h.className = 'video-head';
+        h.textContent = key;
+        list.appendChild(h);
+        grid = document.createElement('div');
+        grid.className = 'video-grid';
+        list.appendChild(grid);
+        continue;
+      }
+      const b = document.createElement('button');
+      b.className = 'mc video-opt';
+      const cur = opts.findIndex(([v]) => v === settings.gfx[key]);
+      b.textContent = `${label}: ${opts[Math.max(0, cur)][1]}`;
+      // Left click: next value, right click: previous.
+      const cycle = (step) => {
+        const i = opts.findIndex(([v]) => v === settings.gfx[key]);
+        settings.gfx[key] = opts[((i < 0 ? 0 : i) + step + opts.length) % opts.length][0];
+        saveSettings();
+        applyGfx(key);
+        renderVideo();
+      };
+      b.addEventListener('click', () => cycle(1));
+      b.addEventListener('contextmenu', (e) => { e.preventDefault(); cycle(-1); });
+      grid.appendChild(b);
+    }
+  }
+  function remeshAll() { if (game.world) for (const ch of game.world.chunks.values()) ch.dirty = true; }
+  // Applies an option change (key = which one; null = everything, at startup).
+  function applyGfx(key) {
+    const G = settings.gfx;
+    VC.gfx = G;
+    if (!key || key === 'smooth') { VC.Mesher.setSmooth(G.smooth); if (key) remeshAll(); }
+    if (key === 'leaves' || key === 'betterGrass' || key === 'clearWater') applyTextures(curTex);
+    if (!key && (G.leaves === 'fast' || G.betterGrass || G.clearWater)) applyTextures(curTex);
+    if (!key || key === 'mipmaps' || key === 'aniso') renderer.setFiltering(G.mipmaps, G.aniso);
+    if (!key || key === 'renderScale') resize();
+    $('vignette').classList.toggle('hidden', !G.vignette);
+    $('fps-counter').classList.toggle('hidden', !G.showFps);
+    if (key === 'aa' && game.chat) game.chat.info('El suavizado se aplica al recargar la página.');
+  }
+  // Atlas tweaks for "Hojas rápidas", "Mejor hierba" and "Agua clara".
+  function gfxAtlas(src) {
+    const G = settings.gfx;
+    if (G.leaves !== 'fast' && !G.betterGrass && !G.clearWater) return src;
+    const c = document.createElement('canvas');
+    c.width = src.width; c.height = src.height;
+    const x = c.getContext('2d');
+    x.drawImage(src, 0, 0);
+    const N = VC.ATLAS_TILES, ts = src.width / N;
+    const img = x.getImageData(0, 0, c.width, c.height), d = img.data;
+    const each = (name, fn) => {
+      const t = VC.TILE_INDEX[name];
+      if (t === undefined) return;
+      const ox = (t % N) * ts, oy = Math.floor(t / N) * ts;
+      for (let y = 0; y < ts; y++) for (let xx = 0; xx < ts; xx++) fn(((oy + y) * c.width + ox + xx) * 4);
+    };
+    if (G.leaves === 'fast') {
+      for (const name of VC.TILES) {
+        if (!name.startsWith('leaves_')) continue;
+        let r = 0, g = 0, b = 0, n = 0;
+        each(name, (i) => { if (d[i + 3] > 127) { r += d[i]; g += d[i + 1]; b += d[i + 2]; n++; } });
+        if (n) each(name, (i) => { if (d[i + 3] <= 127) { d[i] = r / n * 0.45; d[i + 1] = g / n * 0.45; d[i + 2] = b / n * 0.45; d[i + 3] = 255; } });
+      }
+    }
+    if (G.betterGrass) {
+      // Grass sides become fully green (OptiFine "Better Grass: Fast").
+      const top = [], snow = [];
+      each('grass_top', (i) => top.push(d[i], d[i + 1], d[i + 2], d[i + 3]));
+      each('snow', (i) => snow.push(d[i], d[i + 1], d[i + 2], d[i + 3]));
+      let k = 0;
+      each('grass_side', (i) => { for (let j = 0; j < 4; j++) d[i + j] = top[k++]; });
+      k = 0;
+      each('grass_side_snowed', (i) => { for (let j = 0; j < 4; j++) d[i + j] = snow[k++]; });
+    }
+    if (G.clearWater) each('water', (i) => { d[i + 3] = d[i + 3] * 0.5; });
+    x.putImageData(img, 0, 0);
+    return c;
+  }
+
+  // Zoom (OptiFine's C key): narrower FOV and slower mouse while held.
+  const zoomFactor = () => (state === 'playing' && !buildActive() && isDown('zoom') ? 0.25 : 1);
+
+  // Dynamic lights: light-emitting things held, dropped, burning or exploding (nearest 8).
+  const ITEM_LIGHT = {};
+  for (const [k, v] of [['LAVA_BUCKET', 15], ['BLAZE_ROD', 10], ['BLAZE_POWDER', 8], ['GLOWSTONE_DUST', 8], ['NETHER_STAR', 15],
+    ['MAGMA_CREAM', 8], ['PRISMARINE_CRYSTALS', 8], ['FIRE_CHARGE', 15]]) if (I[k]) ITEM_LIGHT[I[k]] = v;
+  const lightOf = (id) => (!id ? 0 : VC.isItem(id) ? ITEM_LIGHT[id] || 0 : P.light[id] || 0);
+  function dynamicLights(eye) {
+    const G = settings.gfx;
+    if (G.dynLights === 'off' || !game.world) return [];
+    const out = [];
+    const add = (pos, lvl) => { if (lvl > 0) out.push([pos[0], pos[1], pos[2], lvl]); };
+    const p = game.player;
+    if (p && !p.spectator && !p.dead) { const h = p.held(); add(p.center(), h ? lightOf(h.id) : 0); }
+    for (const r of mp.players.values()) if (r.ready && r.st.d === game.dim && !r.dead) add(r.center(), lightOf(r.st.h));
+    for (const e of game.entities.list) {
+      if (e instanceof VC.ItemEntity) add(e.center(), lightOf(e.stack.id));
+      else if (e instanceof VC.Mob) add(e.center(), e.burning || e.fireLeft > 0 ? 15 : e.fuse > 0 ? 10 : 0);
+      else if (e instanceof VC.Fireball || e instanceof VC.Firework || e instanceof VC.PrimedTNT) add(e.pos, 15);
+    }
+    const d2 = (a) => (a[0] - eye[0]) ** 2 + (a[1] - eye[1]) ** 2 + (a[2] - eye[2]) ** 2;
+    out.sort((a, b) => d2(a) - d2(b));
+    return out.slice(0, G.dynLights === 'fast' ? 3 : 8);
+  }
+
+  // Round soft shadows under mobs, players and dropped items.
+  const shadowBuf = VC.Models.makeBuf();
+  function entityShadows(eye) {
+    if (!settings.gfx.shadows || !game.world) return null;
+    const w = game.world, b = shadowBuf, N = VC.ATLAS_TILES, t = VC.TILE_INDEX.shadow_blob;
+    if (t === undefined) return null;
+    const u0 = (t % N) / N, v0 = Math.floor(t / N) / N, u1 = u0 + 1 / N, v1 = v0 + 1 / N;
+    b.n = 0;
+    const solidAt = (x, y, z) => P.solid[w.getBlock(Math.floor(x), y, Math.floor(z))];
+    const put = (pos, r) => {
+      if ((pos[0] - eye[0]) ** 2 + (pos[2] - eye[2]) ** 2 > 48 * 48) return;
+      let y = Math.floor(pos[1] + 0.2);
+      for (let k = 0; k < 4 && !solidAt(pos[0], y - 1, pos[2]); k++) y--;
+      if (!solidAt(pos[0], y - 1, pos[2])) return;
+      const gy = y + 0.02, s = r * Math.max(0.3, 1 - (pos[1] - y) / 4);
+      const pts = [[pos[0] - s, gy, pos[2] - s, u0, v0], [pos[0] + s, gy, pos[2] - s, u1, v0], [pos[0] + s, gy, pos[2] + s, u1, v1], [pos[0] - s, gy, pos[2] + s, u0, v1]];
+      if ((b.n + 6) * 8 > b.a.length) { const a = new Float32Array(b.a.length * 2); a.set(b.a); b.a = a; }
+      for (const k of [0, 1, 2, 0, 2, 3]) { const q = pts[k]; b.a.set([q[0], q[1], q[2], q[3], q[4], 1, 1, 0], b.n * 8); b.n++; }
+    };
+    for (const e of game.entities.list) {
+      if (e instanceof VC.Mob && !e.def.flying) put(e.pos, e.hw * 1.3);
+      else if (e instanceof VC.ItemEntity) put(e.pos, 0.22);
+    }
+    for (const r of mp.players.values()) if (r.ready && r.st.d === game.dim && !r.spectator) put(r.pos, 0.45);
+    if (perspective !== 0 && game.player && !game.player.spectator) put(game.player.pos, 0.45);
+    return b.n ? { tex: 'blocks', buf: b, alpha: 0.7 } : null;
+  }
+
   // ---------- Controls screen ----------
   const KEY_NAMES = {
     Space: 'Espacio', ShiftLeft: 'Mayús izq.', ShiftRight: 'Mayús der.', ControlLeft: 'Ctrl izq.', ControlRight: 'Ctrl der.',
@@ -1498,6 +1689,8 @@
   }
 
   $('btn-controls').addEventListener('click', () => { renderControls(); setState('controls'); });
+  $('btn-video').addEventListener('click', () => { renderVideo(); setState('video'); });
+  $('btn-video-done').addEventListener('click', () => setState('options'));
   $('btn-controls-reset').addEventListener('click', () => { settings.keys = Object.assign({}, DEFAULT_KEYS); rebinding = null; saveSettings(); renderControls(); });
   $('btn-controls-done').addEventListener('click', () => { rebinding = null; setState('options'); });
 
@@ -2953,7 +3146,7 @@
 
   document.addEventListener('mousemove', (e) => {
     if (state !== 'playing') return;
-    const s = 0.0022 * settings.sens / 100, p = game.player;
+    const s = 0.0022 * settings.sens / 100 * zoomFactor(), p = game.player;
     p.yaw -= e.movementX * s;
     p.pitch -= e.movementY * s * (settings.invertY ? -1 : 1);
     const lim = Math.PI / 2 - 0.001;
@@ -2993,12 +3186,13 @@
   window.addEventListener('beforeunload', () => saveWorld());
 
   function resize() {
-    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.5) * (settings.gfx.renderScale || 1);
     canvas.width = Math.floor(window.innerWidth * dpr);
     canvas.height = Math.floor(window.innerHeight * dpr);
   }
   window.addEventListener('resize', resize);
   resize();
+  applyGfx(null);
 
   // ---------- Per-frame interaction ----------
   function updateInteraction(dt) {
@@ -3153,6 +3347,8 @@
     }
     const remoteSkins = mpDrawPlayers(w, ranges, blockRanges);
     const overlays = buildDraw(eye, blockRanges);
+    const shadows = entityShadows(eye);
+    if (shadows) overlays.unshift(shadows);
     for (const e of game.entities.list) {
       if (e === spectating) continue;
       const dx = e.pos[0] - eye[0], dz = e.pos[2] - eye[2];
@@ -3257,9 +3453,14 @@
 
   // ---------- Main loop ----------
   let last = performance.now(), fpsN = 0, fpsT = 0, fps = 0, debugT = 0, autosaveT = 0, liquidT = 0, lavaT = 0, randT = 0, uiT = 0;
+  let lastFrame = 0, fpsShownT = 0;
   function frame(now) {
     requestAnimationFrame(frame);
+    const lim = settings.gfx.fpsLimit;
+    if (lim > 0 && now - lastFrame < 1000 / lim - 1) return;
+    lastFrame = now;
     step(now);
+    if (settings.gfx.showFps && now - fpsShownT > 500) { fpsShownT = now; $('fps-counter').textContent = `${fps} FPS`; }
   }
   // Browsers stop requestAnimationFrame in hidden tabs; in multiplayer the world must keep
   // running (the host simulates it for everybody), so a worker timer drives it meanwhile.
@@ -3376,7 +3577,9 @@
       eye: cam.eye,
       yaw: cam.yaw,
       pitch: cam.pitch,
-      fov: settings.fov * player.fovMul * (player.hurtTime > 0 ? 0.98 : 1),
+      fov: settings.fov * (settings.gfx.dynFov ? player.fovMul : 1) * (player.hurtTime > 0 ? 0.98 : 1) * zoomFactor(),
+      gfx: settings.gfx,
+      dynLights: dynamicLights(cam.eye),
       renderDist: settings.renderDist,
       time: game.time,
       totalTime,

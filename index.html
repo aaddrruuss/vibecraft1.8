@@ -9,6 +9,8 @@
 <canvas id="game"></canvas>
 
 <div id="hud" class="hidden">
+  <div id="vignette"></div>
+  <div id="fps-counter" class="hidden"></div>
   <div id="nametags"></div>
   <div id="playerlist" class="hidden"></div>
   <div id="buildbar" class="hidden"></div>
@@ -112,7 +114,10 @@
     <button class="mc half small2" id="opt-editrelease">Editar al soltar</button>
     <button class="mc half small2" id="opt-turbo">Construcción turbo</button>
   </div>
-  <button class="mc" id="btn-controls">Controles...</button>
+  <div class="buttons row">
+    <button class="mc half" id="btn-video">Gráficos...</button>
+    <button class="mc half" id="btn-controls">Controles...</button>
+  </div>
   <div class="buttons row">
     <button class="mc half" id="btn-skin">Elegir skin...</button>
     <button class="mc half" id="btn-skin-reset">Quitar skin</button>
@@ -122,6 +127,15 @@
   <button class="mc" id="btn-packs">Paquetes de texturas...</button>
   <div class="buttons">
     <button class="mc" id="btn-opt-done">Listo</button>
+  </div>
+</div>
+
+<div id="video" class="screen bg hidden">
+  <h2>Gráficos</h2>
+  <div id="video-list"></div>
+  <p class="hint">Clic: siguiente valor · clic derecho: anterior. Mantén C para hacer zoom (tecla en Controles).</p>
+  <div class="buttons">
+    <button class="mc" id="btn-video-done">Listo</button>
   </div>
 </div>
 

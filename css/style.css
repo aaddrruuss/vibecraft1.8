@@ -371,3 +371,17 @@ button.mc.half { width: 196px; }
 }
 #build-info:empty { display: none; }
 button.mc.small2 { font-size: 14px; }
+
+/* ---------- Graphics settings ---------- */
+#video-list {
+  width: 820px; max-width: 96vw; max-height: 64vh; overflow-y: auto;
+  background: rgba(0, 0, 0, 0.45); padding: 8px 14px;
+}
+#video-list .video-head { color: #ffff80; font-size: 16px; margin: 8px 0 4px; }
+#video-list .video-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+button.mc.video-opt { width: 100%; height: 34px; font-size: 14px; }
+#vignette {
+  position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0) 55%, rgba(0, 0, 0, 0.45) 100%);
+}
+#fps-counter { position: absolute; left: 6px; top: 4px; font-size: 14px; color: #fff; text-shadow: 1px 1px #000; }

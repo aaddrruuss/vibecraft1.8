@@ -599,6 +599,12 @@ VC.Textures = (function () {
     }));
     paint('build_white', (p) => each((x, y) => p(x, y, (x === 0 || y === 0 || x === 15 || y === 15) ? [255, 255, 255] : [210, 235, 255])));
 
+    // Soft round shadow drawn under entities (alpha falls off towards the edge).
+    paint('shadow_blob', (p) => each((x, y) => {
+      const r = Math.hypot(x - 7.5, y - 7.5) / 7.5;
+      p(x, y, [0, 0, 0], r < 1 ? Math.round(170 * (1 - r * r)) : 0);
+    }));
+
     // ---------- Breaking stages ----------
     const cracks = [];
     for (const [sx, sy] of [[8, 8], [8, 8], [3, 4], [12, 12], [12, 3], [4, 12]]) {
