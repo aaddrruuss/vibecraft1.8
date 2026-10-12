@@ -120,6 +120,27 @@ Cómo funciona: la conexión inicial se acuerda a través del servidor público 
 - No se sincronizan: dormir para saltar la noche (solo el anfitrión), tocadiscos/bloques musicales, ni el cofre de Ender
   (es de cada jugador).
 
+## Gráficos (estilo OptiFine)
+
+**Opciones → Gráficos...** (clic: siguiente valor, clic derecho: anterior):
+- **Calidad:** brillo, iluminación suave, **luces dinámicas** (antorchas, piedra luminosa, lava… en la mano, tiradas
+  o de otros jugadores; mobs ardiendo, TNT, cohetes), niebla e inicio de niebla, nubes 3D / planas / sin nubes y su
+  altura, hojas elegantes/rápidas, mejor hierba, agua clara, cielo, estrellas, sol y luna, mipmaps, filtro
+  anisotrópico y suavizado (al recargar).
+- **Detalles:** sombras bajo las entidades, viñeta, balanceo de cámara, FOV dinámico, contador de FPS.
+- **Animaciones:** agua y lava animadas, nivel de partículas.
+- **Rendimiento:** FPS máximos, escala de resolución, velocidad de carga de chunks.
+- **Shaders:** plantas y hojas que se mueven con el viento, olas en el agua y luz de color al amanecer/atardecer.
+- **Zoom:** mantén **C** (como en OptiFine).
+
+## Paquetes de sonido
+
+**Opciones → Paquetes de sonido... → Añadir paquete...** y elige un `.zip` de paquete de recursos con sonidos
+(`assets/minecraft/sounds/*.ogg`, con o sin `sounds.json`), de la 1.8 o más nuevo: por ejemplo los sonidos del
+propio Minecraft o paquetes de la comunidad. Se usan para bloques, pasos, mobs, daño, explosiones, arco, cofres,
+puertas, comer, portales, cohetes… Si el paquete trae discos o música (`records/`, `music/game/`) también suenan
+(la música de fondo se puede desactivar ahí). Lo que el paquete no tenga sigue con los sonidos sintetizados.
+
 ## Paquetes de texturas
 
 **Opciones → Paquetes de texturas... → Añadir paquete...** y elige el `.zip` de un paquete de recursos de
