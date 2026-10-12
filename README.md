@@ -74,6 +74,18 @@ redstone (polvo, repetidores, comparadores, pistones, lámparas, sensores…), v
 reloj animados, caña de pescar, encantamientos, pociones con efectos, soporte de pociones, faro, cuadros, marcos,
 soportes de armadura, carteles (sin texto), correas y etiquetas.
 
+## Paquetes de texturas
+
+**Opciones → Paquetes de texturas... → Añadir paquete...** y elige el `.zip` de un paquete de recursos de
+**Minecraft 1.8** tal cual (sin descomprimir). Se guarda en el navegador; haz clic en uno para activarlo o en
+"Por defecto" para volver a las texturas de Vibecraft.
+
+Se usan: bloques, objetos, mobs (zombi, esqueleto, creeper, araña, cerdo, vaca, oveja, gallina, hombre-cerdo,
+ghast, Steve), armaduras puestas, cofres, cabezas, corazones/comida/armadura del HUD y algunas partículas.
+Admite paquetes HD (32x, 64x; los de más resolución se reducen a 64x). Las texturas en gris de MC (hierba, hojas,
+lianas…) se tiñen con el color de las llanuras (o el `colormap` del paquete). Lo que el paquete no traiga se queda
+con la textura del juego. Paquetes de versiones más nuevas cargan, pero pueden faltar texturas renombradas.
+
 ## Skin personalizada
 
 Deja tu skin (PNG estándar de 64x64 o 64x32) como `skin/skin.png`. Funciona si abres el juego con un servidor local.

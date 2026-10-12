@@ -718,5 +718,8 @@ VC.Models = (function () {
     quad(itemBuf, pts, tileUV(sprite), 1, light, true);
   }
 
-  return { buildAtlas, makeBuf, mob, armor, heldItem, arrow, droppedItem, thrown, blockEntity, crack, hand, setSkinSize, lightAt, billboard };
+  // Atlas layout for resource packs: region key -> { u, v, w, h, d } in pixels of an S x S atlas.
+  const atlasInfo = () => ({ regions, S, faceRect });
+
+  return { buildAtlas, atlasInfo, makeBuf, mob, armor, heldItem, arrow, droppedItem, thrown, blockEntity, crack, hand, setSkinSize, lightAt, billboard };
 })();

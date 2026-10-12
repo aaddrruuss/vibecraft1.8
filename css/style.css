@@ -268,6 +268,24 @@ button.mc.small { width: 200px; height: 32px; font-size: 15px; }
 button.mc.conflict { color: #ff5555; }
 .buttons.row { flex-direction: row; }
 button.mc.half { width: 196px; }
+
+/* ---------- Resource packs ---------- */
+#packs-list {
+  width: 620px; max-width: 94vw;
+  max-height: 52vh;
+  overflow-y: auto;
+  background: rgba(0, 0, 0, 0.45);
+  padding: 6px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.pack-row { display: flex; align-items: center; gap: 10px; padding: 4px; border: 2px solid transparent; cursor: pointer; }
+.pack-row:hover { background: rgba(255, 255, 255, 0.08); }
+.pack-row.active { border-color: #a0a0a0; }
+.pack-row img, .pack-row .pack-noicon { width: 48px; height: 48px; image-rendering: pixelated; flex: none; background: #333; }
+.pack-row .pack-text { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.pack-row .pack-name { font-size: 16px; }
+.pack-row .pack-desc { font-size: 13px; color: #a0a0a0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pack-row .pack-del { width: 32px; height: 32px; font-size: 15px; flex: none; }
 .inv-panel .slot.drag { background: #d8d8d8; }
 
 /* ---------- 1.8 content: tabs, tooltip, armor, sleep ---------- */

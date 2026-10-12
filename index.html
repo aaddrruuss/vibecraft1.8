@@ -67,6 +67,7 @@
   </div>
   <input type="file" id="skin-file" accept="image/png" hidden>
   <p class="hint" id="skin-status">Skin: Steve</p>
+  <button class="mc" id="btn-packs">Paquetes de texturas...</button>
   <div class="buttons">
     <button class="mc" id="btn-opt-done">Listo</button>
   </div>
@@ -80,6 +81,18 @@
     <button class="mc half" id="btn-controls-reset">Restablecer todo</button>
     <button class="mc half" id="btn-controls-done">Listo</button>
   </div>
+</div>
+
+<div id="packs" class="screen bg hidden">
+  <h2>Paquetes de texturas</h2>
+  <div id="packs-list"></div>
+  <p class="hint">Admite paquetes de recursos de Minecraft 1.8 (.zip). Haz clic en uno para activarlo.</p>
+  <p class="hint" id="packs-status"></p>
+  <div class="buttons row">
+    <button class="mc half" id="btn-pack-add">Añadir paquete...</button>
+    <button class="mc half" id="btn-packs-done">Listo</button>
+  </div>
+  <input type="file" id="pack-file" accept=".zip,application/zip" hidden>
 </div>
 
 <div id="loading" class="screen bg hidden">
@@ -136,6 +149,7 @@
 <script src="js/models.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/chat.js"></script>
+<script src="js/packs.js"></script>
 <script src="js/main.js"></script>
 </body>
 </html>

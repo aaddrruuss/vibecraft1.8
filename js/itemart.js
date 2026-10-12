@@ -345,14 +345,14 @@ VC.ItemArt = (function () {
   }
 
   function icons(atlas) {
-    const out = {};
+    const out = {}, ts = atlas.width / NT;
     for (const k in VC.ITEMS) {
       const it = VC.ITEMS[k], t = it.sprite;
       const c = document.createElement('canvas');
       c.width = c.height = 32;
       const x = c.getContext('2d');
       x.imageSmoothingEnabled = false;
-      x.drawImage(atlas, (t % NT) * 16, Math.floor(t / NT) * 16, 16, 16, 0, 0, 32, 32);
+      x.drawImage(atlas, (t % NT) * ts, Math.floor(t / NT) * ts, ts, ts, 0, 0, 32, 32);
       if (it.glint) { x.globalCompositeOperation = 'source-atop'; x.fillStyle = 'rgba(160,80,255,0.3)'; x.fillRect(0, 0, 32, 32); }
       out[k] = c.toDataURL();
     }

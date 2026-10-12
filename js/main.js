@@ -17,12 +17,13 @@
     return;
   }
 
-  const atlas = VC.Textures.build();
+  // Procedural textures; a resource pack is drawn over copies of these (see applyTextures).
+  const baseTex = { atlas: VC.Textures.build(), items: VC.ItemArt.build(), mobs: VC.Models.buildAtlas() };
+  let atlas = baseTex.atlas;
   renderer.setAtlas(atlas);
-  const itemAtlas = VC.ItemArt.build();
-  renderer.setTexture('items', itemAtlas);
-  renderer.setTexture('mobs', VC.Models.buildAtlas());
-  const icons = VC.ItemArt.icons(itemAtlas);
+  renderer.setTexture('items', baseTex.items);
+  renderer.setTexture('mobs', baseTex.mobs);
+  const icons = VC.ItemArt.icons(baseTex.items);
   // Block icons are drawn lazily the first time they are needed.
   const iconFor = (id) => {
     if (icons[id] === undefined) {
@@ -34,6 +35,21 @@
   };
   const hudIcons = VC.ItemArt.hud();
   document.body.style.setProperty('--dirt', `url(${VC.Textures.menuBackground(atlas)})`);
+
+  // Swaps every atlas, icon and HUD glyph (t = VC.Packs.build result, or baseTex for none).
+  function applyTextures(t) {
+    atlas = t.atlas;
+    renderer.setAtlas(t.atlas);
+    renderer.setTexture('items', t.items);
+    renderer.setTexture('mobs', t.mobs);
+    for (const k in icons) delete icons[k];
+    Object.assign(icons, VC.ItemArt.icons(t.items));
+    Object.assign(hudIcons, VC.ItemArt.hud(), t.hud || {});
+    document.body.style.setProperty('--dirt', `url(${VC.Textures.menuBackground(t.atlas)})`);
+    hotbarVersion = -1;
+    statsKey = '';
+    if (game.ui && state === 'inventory') game.ui.render();
+  }
 
   // ---------- Settings ----------
   // [action, label, default code]
@@ -295,7 +311,7 @@
   let swingT = 1;
   let lastSpace = 0, lastW = 0, stepDist = 0;
 
-  const SCREENS = { controls: 'controls', menu: 'menu', newworld: 'newworld', options: 'options', loading: 'loading', ready: 'ready', paused: 'pause', inventory: 'inventory', dead: 'death' };
+  const SCREENS = { packs: 'packs', controls: 'controls', menu: 'menu', newworld: 'newworld', options: 'options', loading: 'loading', ready: 'ready', paused: 'pause', inventory: 'inventory', dead: 'death' };
   function setState(s) {
     state = s;
     for (const k in SCREENS) $(SCREENS[k]).classList.toggle('hidden', SCREENS[k] !== SCREENS[s]);
@@ -1458,6 +1474,92 @@
     saveWorld();
   });
   $('seed-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('btn-create').click(); });
+  // ---------- Resource packs ----------
+  let packBusy = false;
+  // id null = default textures. pack = already-loaded pack (skips re-reading the zip).
+  async function activatePack(id, pack) {
+    if (packBusy) return;
+    packBusy = true;
+    const status = $('packs-status');
+    try {
+      if (!id) applyTextures(baseTex);
+      else {
+        status.textContent = 'Cargando paquete...';
+        if (!pack) {
+          const data = await VC.Packs.getData(id);
+          if (!data) throw new Error('El paquete ya no está instalado');
+          pack = await VC.Packs.load(data);
+        }
+        applyTextures(VC.Packs.build(pack, baseTex));
+        status.textContent = pack.format > 1 ? 'Aviso: este paquete es de una versión más nueva que la 1.8; puede faltar alguna textura.' : '';
+      }
+      settings.pack = id || null;
+      saveSettings();
+    } catch (e) {
+      console.error(e);
+      status.textContent = 'Error: ' + e.message;
+      applyTextures(baseTex);
+      settings.pack = null;
+      saveSettings();
+    }
+    packBusy = false;
+    renderPacks();
+  }
+
+  async function renderPacks() {
+    let packs = [];
+    try { packs = await VC.Packs.list(); } catch (e) { $('packs-status').textContent = 'Este navegador no permite guardar paquetes: ' + e.message; }
+    const list = $('packs-list');
+    list.innerHTML = '';
+    const row = (info, name, desc) => {
+      const r = document.createElement('div');
+      r.className = 'pack-row' + ((settings.pack || null) === (info ? info.id : null) ? ' active' : '');
+      const icon = document.createElement(info && info.icon ? 'img' : 'div');
+      if (info && info.icon) icon.src = info.icon; else icon.className = 'pack-noicon';
+      const text = document.createElement('div');
+      text.className = 'pack-text';
+      const n = document.createElement('span'), d = document.createElement('span');
+      n.className = 'pack-name'; n.textContent = name;
+      d.className = 'pack-desc'; d.textContent = desc;
+      text.append(n, d);
+      r.append(icon, text);
+      r.addEventListener('click', () => activatePack(info ? info.id : null));
+      if (info) {
+        const del = document.createElement('button');
+        del.className = 'mc pack-del';
+        del.textContent = 'X';
+        del.title = 'Borrar paquete';
+        del.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          await VC.Packs.remove(info.id);
+          if (settings.pack === info.id) activatePack(null); else renderPacks();
+        });
+        r.append(del);
+      }
+      list.append(r);
+    };
+    row(null, 'Por defecto', 'Texturas de Vibecraft');
+    for (const p of packs) row(p, p.name, p.desc || '');
+  }
+
+  $('btn-packs').addEventListener('click', () => { $('packs-status').textContent = ''; renderPacks(); setState('packs'); });
+  $('btn-packs-done').addEventListener('click', () => setState('options'));
+  $('btn-pack-add').addEventListener('click', () => $('pack-file').click());
+  $('pack-file').addEventListener('change', async (e) => {
+    const f = e.target.files[0];
+    e.target.value = '';
+    if (!f) return;
+    $('packs-status').textContent = `Instalando ${f.name}...`;
+    try {
+      const { info, pack } = await VC.Packs.install(f);
+      await activatePack(info.id, pack);
+    } catch (err) {
+      console.error(err);
+      $('packs-status').textContent = 'Error: ' + err.message;
+    }
+  });
+  if (settings.pack) activatePack(settings.pack);
+
   $('btn-options').addEventListener('click', () => openOptions('menu'));
   $('btn-pause-options').addEventListener('click', () => openOptions('paused'));
   $('btn-opt-done').addEventListener('click', () => setState(optionsReturn));

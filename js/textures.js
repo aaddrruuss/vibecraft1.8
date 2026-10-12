@@ -589,18 +589,20 @@ VC.Textures = (function () {
     return cv;
   }
 
-  function tileRect(t) { return [(t % NT) * 16, Math.floor(t / NT) * 16]; }
+  // Tile position in an atlas whose tiles are ts pixels (16 procedural, more with HD packs).
+  function tileRect(t, ts = 16) { return [(t % NT) * ts, Math.floor(t / NT) * ts]; }
 
   // Isometric icon per creative block (flat sprite for plants & thin shapes).
   function icons(atlas, ids) {
+    const ts = atlas.width / NT;
     const shaded = (k) => {
       const c = document.createElement('canvas');
-      c.width = c.height = S;
+      c.width = c.height = atlas.width;
       const x = c.getContext('2d');
       x.drawImage(atlas, 0, 0);
       x.globalCompositeOperation = 'source-atop';
       x.fillStyle = `rgba(0,0,0,${1 - k})`;
-      x.fillRect(0, 0, S, S);
+      x.fillRect(0, 0, atlas.width, atlas.width);
       return c;
     };
     const mid = shaded(0.8), dark = shaded(0.6);
@@ -614,9 +616,9 @@ VC.Textures = (function () {
       const x = c.getContext('2d');
       x.imageSmoothingEnabled = false;
       const face = (src, tile, a, b, cc, dd, e, f, h = 16, oy = 0) => {
-        const [tx, ty] = tileRect(tile);
+        const [tx, ty] = tileRect(tile, ts), k = ts / 16;
         x.setTransform(a, b, cc, dd, e, f);
-        x.drawImage(src, tx, ty + oy, 16, h, 0, oy, 16, h);
+        x.drawImage(src, tx, ty + oy * k, ts, h * k, 0, oy, 16, h);
       };
       const tex = (f) => P.tex[id * 6 + f];
       const sh = P.shape[id];
@@ -629,9 +631,9 @@ VC.Textures = (function () {
         face(mid, tex(4), s, 7 / 16, 0, 1, 1, 8, hgt, oy);
         face(dark, tex(0), s, -7 / 16, 0, 1, 16, 15, hgt, oy);
         x.setTransform(1, 0, 0, 1, 0, lift);
-        const [tx, ty] = tileRect(tex(2));
+        const [tx, ty] = tileRect(tex(2), ts);
         x.setTransform(s, -7 / 16, s, 7 / 16, 1, 8 + lift);
-        x.drawImage(atlas, tx, ty, 16, 16, 0, 0, 16, 16);
+        x.drawImage(atlas, tx, ty, ts, ts, 0, 0, 16, 16);
       }
       out[id] = c.toDataURL();
     }
@@ -642,8 +644,8 @@ VC.Textures = (function () {
     const c = document.createElement('canvas');
     c.width = c.height = 16;
     const x = c.getContext('2d');
-    const [tx, ty] = tileRect(VC.tile('dirt'));
-    x.drawImage(atlas, tx, ty, 16, 16, 0, 0, 16, 16);
+    const ts = atlas.width / NT, [tx, ty] = tileRect(VC.tile('dirt'), ts);
+    x.drawImage(atlas, tx, ty, ts, ts, 0, 0, 16, 16);
     x.fillStyle = 'rgba(0,0,0,0.55)';
     x.fillRect(0, 0, 16, 16);
     return c.toDataURL();
