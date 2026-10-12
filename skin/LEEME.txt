@@ -1,0 +1,5 @@
+Pon aquí tu skin de Minecraft con el nombre skin.png (PNG de 64x64 o 64x32, formato estándar de Minecraft).
+
+- Funciona si abres el juego con un servidor local (python -m http.server).
+- Si abres index.html con doble clic, el navegador no deja leer este archivo:
+  usa Opciones -> "Elegir skin..." y selecciona el PNG (se guarda en el navegador).

@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Vibecraft 1.8</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud" class="hidden">
+  <div id="crosshair"></div>
+  <pre id="debug" class="hidden"></pre>
+  <div id="hurt"></div>
+  <div id="flash"></div>
+  <div id="sleep"></div>
+  <div id="portal-fx"></div>
+  <div id="hotbar-name"></div>
+  <div id="stats">
+    <div id="left-stats"><div id="armor"></div><div id="hearts"></div></div>
+    <div id="right-stats"><div id="air"></div><div id="food"></div></div>
+  </div>
+  <div id="hotbar"></div>
+  <div id="chat-log"></div>
+  <input id="chat-input" class="hidden" type="text" maxlength="256" autocomplete="off" spellcheck="false">
+</div>
+
+<div id="menu" class="screen bg">
+  <div class="logo">
+    <div class="title">VIBECRAFT</div>
+    <div class="splash">¡Hecho desde cero!</div>
+  </div>
+  <div class="buttons">
+    <button class="mc" id="btn-continue">Continuar mundo</button>
+    <button class="mc" id="btn-new">Nuevo mundo</button>
+    <button class="mc" id="btn-options">Opciones...</button>
+  </div>
+  <div class="footer left">Vibecraft 1.8</div>
+  <div class="footer right">Clon hecho a mano. No afiliado a Mojang.</div>
+</div>
+
+<div id="newworld" class="screen bg hidden">
+  <h2>Crear nuevo mundo</h2>
+  <label for="seed-input">Semilla para el generador de mundos</label>
+  <input id="seed-input" class="mc" type="text" placeholder="Déjalo en blanco para una semilla aleatoria" maxlength="32">
+  <div class="buttons">
+    <button class="mc" id="btn-newmode">Modo de juego: Supervivencia</button>
+  </div>
+  <p class="hint">Atención: sobrescribe el mundo guardado.</p>
+  <div class="buttons">
+    <button class="mc" id="btn-create">Crear mundo</button>
+    <button class="mc" id="btn-cancel">Cancelar</button>
+  </div>
+</div>
+
+<div id="options" class="screen bg hidden">
+  <h2>Opciones</h2>
+  <div class="slider mc"><input type="range" id="opt-rd" min="2" max="16" step="1"><span id="opt-rd-l"></span></div>
+  <div class="slider mc"><input type="range" id="opt-fov" min="30" max="110" step="1"><span id="opt-fov-l"></span></div>
+  <div class="slider mc"><input type="range" id="opt-sens" min="10" max="200" step="1"><span id="opt-sens-l"></span></div>
+  <div class="slider mc"><input type="range" id="opt-vol" min="0" max="100" step="1"><span id="opt-vol-l"></span></div>
+  <button class="mc" id="opt-invert">Invertir ratón: NO</button>
+  <button class="mc" id="btn-controls">Controles...</button>
+  <div class="buttons row">
+    <button class="mc half" id="btn-skin">Elegir skin...</button>
+    <button class="mc half" id="btn-skin-reset">Quitar skin</button>
+  </div>
+  <input type="file" id="skin-file" accept="image/png" hidden>
+  <p class="hint" id="skin-status">Skin: Steve</p>
+  <div class="buttons">
+    <button class="mc" id="btn-opt-done">Listo</button>
+  </div>
+</div>
+
+<div id="controls" class="screen bg hidden">
+  <h2>Controles</h2>
+  <div id="keys-list"></div>
+  <p class="hint">Haz clic en una acción y pulsa una tecla o botón del ratón. Esc cancela. En rojo: teclas repetidas.</p>
+  <div class="buttons row">
+    <button class="mc half" id="btn-controls-reset">Restablecer todo</button>
+    <button class="mc half" id="btn-controls-done">Listo</button>
+  </div>
+</div>
+
+<div id="loading" class="screen bg hidden">
+  <h2 id="loading-title">Generando terreno</h2>
+  <div id="load-bar"><div></div></div>
+</div>
+
+<div id="ready" class="screen dim hidden">
+  <h2>Mundo listo</h2>
+  <p>Haz clic para jugar</p>
+</div>
+
+<div id="pause" class="screen dim hidden">
+  <h2>Menú del juego</h2>
+  <div class="buttons">
+    <button class="mc" id="btn-resume">Volver al juego</button>
+    <button class="mc" id="btn-mode">Modo: Supervivencia</button>
+    <button class="mc" id="btn-pause-options">Opciones...</button>
+    <button class="mc" id="btn-quit">Guardar y salir al título</button>
+  </div>
+</div>
+
+<div id="inventory" class="screen dim hidden"></div>
+<div id="cursor-item"></div>
+<div id="tooltip" class="hidden"></div>
+
+<div id="death" class="screen hidden">
+  <h1>¡Has muerto!</h1>
+  <div class="buttons">
+    <button class="mc" id="btn-respawn">Reaparecer</button>
+    <button class="mc" id="btn-death-quit">Salir al título</button>
+  </div>
+</div>
+
+<div id="error" class="screen hidden"></div>
+
+<script src="js/math.js"></script>
+<script src="js/noise.js"></script>
+<script src="js/blocks.js"></script>
+<script src="js/items.js"></script>
+<script src="js/itemart.js"></script>
+<script src="js/sound.js"></script>
+<script src="js/textures.js"></script>
+<script src="js/inventory.js"></script>
+<script src="js/shapes.js"></script>
+<script src="js/generator.js"></script>
+<script src="js/nether.js"></script>
+<script src="js/world.js"></script>
+<script src="js/mesher.js"></script>
+<script src="js/renderer.js"></script>
+<script src="js/entity.js"></script>
+<script src="js/player.js"></script>
+<script src="js/mobs.js"></script>
+<script src="js/models.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/chat.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
