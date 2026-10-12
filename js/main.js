@@ -2008,7 +2008,7 @@
     const ax = Math.atan((mousePos.x - (r.left + r.width / 2)) / 40);
     const ay = Math.atan((mousePos.y - (r.top + r.height * 0.28)) / 40);
     const m = Object.assign({}, avatar, {
-      pos: [0, 0, 0], bodyYaw: -Math.PI - ax * 0.35, yaw: -Math.PI - ax * 0.75, headPitch: -ay * 0.5,
+      pos: [0, 0, 0], bodyYaw: -Math.PI + ax * 0.35, yaw: -Math.PI + ax * 0.75, headPitch: -ay * 0.5,
       limbSwing: 0, limbAmp: 0, swing: 0, sneaking: false, using: false, bowing: false, tilt: 0, wing: 0,
       dead: false, deathTime: 0, skin: game.skin && !!skinImg,
     });
