@@ -224,6 +224,9 @@
         if (!(e instanceof VC.Mob) || e.dead) continue;
         if (Math.abs(pos[0] - e.pos[0]) < e.hw + 0.1 && Math.abs(pos[2] - e.pos[2]) < e.hw + 0.1 && pos[1] > e.pos[1] && pos[1] < e.pos[1] + e.height) return e;
       }
+      for (const q of mpHittable()) {
+        if (Math.abs(pos[0] - q.pos[0]) < 0.4 && Math.abs(pos[2] - q.pos[2]) < 0.4 && pos[1] > q.pos[1] && pos[1] < q.pos[1] + 1.8) return q;
+      }
       return null;
     },
 
@@ -780,6 +783,20 @@
     const hitB = pick();
     const bd = hitB ? hitB.t : Infinity;
     const hitE = game.entities.raycast(e, f, p.creative ? 5 : 3.5);
+    // Other players (multiplayer PvP).
+    const hitP = mpRaycastPlayers(e, f, Math.min(bd, hitE ? hitE.t : Infinity, p.creative ? 5 : 3.5));
+    if (hitP) {
+      const tool = heldTool();
+      let dmg = tool ? tool.damage : 1;
+      if (p.fallDist > 0 && !p.onGround && !p.inWater) dmg *= 1.5;
+      if (hitP.hurt(dmg, p.pos, true, `fue asesinado por ${playerName()}`, true)) {
+        if (tool) damageHeld(tool.type === 'sword' ? 1 : 2);
+        p.addExhaustion(0.3);
+        VC.Sound.hurt(hitP.center());
+      }
+      swingT = 0;
+      return true;
+    }
     if (hitE && hitE.t < bd) {
       const tool = heldTool();
       let dmg = tool ? tool.damage : 1;
@@ -1679,7 +1696,11 @@
     // Damage dealt by the host's mobs / explosions is applied on the owner's machine.
     hurt(amount, src, knock = true, cause, armorable) {
       if (this.dead || this.creative || this.spectator || amount <= 0) return false;
-      mpSend({ t: 'hurt', a: amount, s: src || null, k: !!knock, c: typeof cause === 'string' ? cause : null, ar: armorable === undefined ? !!src : armorable }, this.id);
+      const msg = { t: 'hurt', a: amount, s: src || null, k: !!knock, c: typeof cause === 'string' ? cause : null, ar: armorable === undefined ? !!src : armorable };
+      // Guests have no direct link to each other: player-vs-player damage goes through the host.
+      if (mp.guest) mpSend(Object.assign(msg, { t: 'pvp', to: this.id }));
+      else mpSend(msg, this.id);
+      this.hitT = 0.4; // red flash until their own state says they were hurt
       return true;
     }
     setSkin(url) {
@@ -1703,6 +1724,25 @@
     else mp.room.broadcast(msg);
   }
   const mpRemotesIn = (dim) => [...mp.players.values()].filter((r) => r.ready && r.st.d === dim);
+  // Other players this client can hit (host and guests alike).
+  const mpHittable = () => mpRemotesIn(game.dim).filter((r) => !r.dead && !r.spectator && !r.creative);
+  // Nearest other player along a ray, closer than maxT.
+  function mpRaycastPlayers(o, d, maxT) {
+    let best = null, bt = maxT;
+    for (const q of mpHittable()) {
+      const mn = [q.pos[0] - 0.4, q.pos[1], q.pos[2] - 0.4], mx = [q.pos[0] + 0.4, q.pos[1] + 1.9, q.pos[2] + 0.4];
+      let t0 = 0, t1 = bt, ok = true;
+      for (let i = 0; i < 3 && ok; i++) {
+        if (Math.abs(d[i]) < 1e-9) { if (o[i] < mn[i] || o[i] > mx[i]) ok = false; continue; }
+        let a = (mn[i] - o[i]) / d[i], b = (mx[i] - o[i]) / d[i];
+        if (a > b) { const t = a; a = b; b = t; }
+        t0 = Math.max(t0, a); t1 = Math.min(t1, b);
+        if (t0 > t1) ok = false;
+      }
+      if (ok && t0 < bt) { bt = t0; best = q; }
+    }
+    return best;
+  }
 
   function mpSay(line, cls) {
     game.chat.print(line, cls);
@@ -1920,7 +1960,7 @@
       d: game.dim, x: r2(p.pos[0]), y: r2(p.pos[1]), z: r2(p.pos[2]),
       yaw: r2(a.yaw), by: r2(a.bodyYaw), hp: r2(a.headPitch), ls: r2(a.limbSwing), la: r2(a.limbAmp),
       sw: r2(a.swing), sn: p.sneaking ? 1 : 0, us: a.using ? 1 : 0, h: s ? s.id : 0, ar: a.armor, el: a.elytra ? 1 : 0,
-      wi: r2(a.wing), ti: r2(a.tilt), dd: p.dead ? 1 : 0, sl: p.sleeping ? 1 : 0, m: modeOf(p),
+      wi: r2(a.wing), ti: r2(a.tilt), dd: p.dead ? 1 : 0, sl: p.sleeping ? 1 : 0, m: modeOf(p), hu: p.hurtTime > 0 ? 1 : 0,
     };
   }
   function mpApplyState(r, st) {
@@ -1944,7 +1984,8 @@
       });
       av.deathTime = av.dead ? (av.deathTime || 0) + 0.016 : 0;
       av.skin = !!r.skinH;
-      const tint = av.dead ? [1, 0, 0, 0.45] : null;
+      if (r.hitT > 0) r.hitT -= 0.016;
+      const tint = av.dead || st.hu || r.hitT > 0 ? [1, 0, 0, 0.45] : null;
       if (r.skinH) {
         r.buf.n = 0;
         VC.Models.setSkinSize(r.skinH);
@@ -2151,9 +2192,18 @@
         game.spawn = m.sp || game.spawn;
         if (m.df !== game.difficulty) setDifficulty(m.df);
         break;
+      case 'pvp': {
+        if (!mp.host) break;
+        const hit = Object.assign({}, m, { t: 'hurt' });
+        if (m.to === 'host') mpOnMessage(from, hit);
+        else mp.room.send(m.to, hit);
+        break;
+      }
       case 'hurt': {
-        const p = game.player;
+        const p = game.player, ds = p.damageScale;
+        if (!ds) p.damageScale = 1; // Peaceful only removes monsters, players can still hit
         p.hurt(m.a, m.s, m.k, m.c || 'murió', m.ar);
+        p.damageScale = ds;
         break;
       }
       case 'give': {

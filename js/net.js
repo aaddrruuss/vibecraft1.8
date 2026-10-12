@@ -21,6 +21,7 @@ VC.Net = (function () {
     constructor(id) {
       this.id = id;
       this.handlers = {};
+      this.onclose = null;
       this.ready = new Promise((res, rej) => {
         let ws;
         try { ws = new WebSocket(`${SERVER}?key=peerjs&id=${encodeURIComponent(id)}&token=${rand(12, 'abcdefghijklmnopqrstuvwxyz0123456789')}`); } catch (e) { rej(e); return; }
