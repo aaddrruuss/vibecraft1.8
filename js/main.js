@@ -1710,11 +1710,12 @@
 
   // ---------- Custom skin ----------
   // Priority: skin chosen in Options (stored in localStorage) > skin/skin.png next to index.html.
-  let localSkinH = 64, mySkinUrl = null; // mySkinUrl is sent to other players
+  let localSkinH = 64, mySkinUrl = null, skinImg = null; // mySkinUrl is sent to other players
   function applySkin(img, source) {
     try {
       if (img.width !== 64 || (img.height !== 64 && img.height !== 32)) throw new Error('La skin debe ser un PNG de 64x64 o 64x32');
       renderer.setTexture('skin', img);
+      skinImg = img;
       VC.Models.setSkinSize(img.height);
       localSkinH = img.height;
       mySkinUrl = img.src.startsWith('data:') ? img.src : null;
@@ -1731,6 +1732,7 @@
     } catch (e) {
       game.skin = false;
       mySkinUrl = null;
+      skinImg = null;
       $('skin-status').textContent = 'Skin: Steve (' + e.message + ')';
     }
   }
@@ -1885,6 +1887,66 @@
     closeWorld(true);
     setState('menu');
   });
+
+  // ---------- Inventory player preview ----------
+  // Like MC: the player (with your skin and armor) turns its head and body towards the mouse.
+  const mousePos = { x: 0, y: 0 };
+  document.addEventListener('mousemove', (e) => { mousePos.x = e.clientX; mousePos.y = e.clientY; });
+  const shadedCache = new Map();
+  // Darkened copy of a texture for a face brightness level (cached).
+  function shadedTex(img, k) {
+    let byImg = shadedCache.get(img);
+    if (!byImg) { byImg = new Map(); shadedCache.set(img, byImg); }
+    if (byImg.has(k)) return byImg.get(k);
+    const c = document.createElement('canvas');
+    c.width = img.width; c.height = img.height;
+    const x = c.getContext('2d');
+    x.drawImage(img, 0, 0);
+    if (k < 1) {
+      x.globalCompositeOperation = 'source-atop';
+      x.fillStyle = `rgba(0,0,0,${1 - k})`;
+      x.fillRect(0, 0, c.width, c.height);
+    }
+    byImg.set(k, c);
+    return c;
+  }
+  function drawInventoryPreview() {
+    const c = game.ui.preview;
+    if (!c || !c.isConnected || !game.player) return;
+    const r = c.getBoundingClientRect();
+    const ax = Math.atan((mousePos.x - (r.left + r.width / 2)) / 40);
+    const ay = Math.atan((mousePos.y - (r.top + r.height * 0.28)) / 40);
+    const m = Object.assign({}, avatar, {
+      pos: [0, 0, 0], bodyYaw: -Math.PI - ax * 0.35, yaw: -Math.PI - ax * 0.75, headPitch: -ay * 0.5,
+      limbSwing: 0, limbAmp: 0, swing: 0, sneaking: false, using: false, bowing: false, tilt: 0, wing: 0,
+      dead: false, deathTime: 0, skin: game.skin && !!skinImg,
+    });
+    const faces = VC.Models.previewFaces(m);
+    const ctx = c.getContext('2d');
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, c.width, c.height);
+    ctx.imageSmoothingEnabled = false;
+    const scale = c.height / 2.25, ox = c.width / 2, oy = c.height * 0.95;
+    const P = (p) => [ox + p[0] * scale, oy - p[1] * scale];
+    // Painter's algorithm, back faces culled (we look along -z).
+    const vis = faces.filter((f) => f.n[2] > 0.01).map((f) => ({ f, z: (f.pts[0][2] + f.pts[1][2] + f.pts[2][2] + f.pts[3][2]) / 4 }));
+    vis.sort((a, b) => a.z - b.z);
+    const mobs = curTex.mobs;
+    for (const { f } of vis) {
+      const src = f.tex === 'skin' ? skinImg : mobs;
+      if (!src) continue;
+      const k = Math.round(Math.min(1, VC.Models.shadeOf(f.n)) * 10) / 10;
+      const img = shadedTex(src, k);
+      const W = img.width, H = img.height;
+      const u0 = f.uv[0] * W, v0 = f.uv[1] * H, w = (f.uv[2] - f.uv[0]) * W, h = (f.uv[3] - f.uv[1]) * H;
+      if (w <= 0 || h <= 0) continue;
+      // Corners: pts[3] -> (u0,v0), pts[2] -> (u1,v0), pts[0] -> (u0,v1).
+      const a = P(f.pts[3]), b = P(f.pts[2]), d = P(f.pts[0]);
+      ctx.setTransform((b[0] - a[0]) / w, (b[1] - a[1]) / w, (d[0] - a[0]) / h, (d[1] - a[1]) / h, a[0], a[1]);
+      ctx.drawImage(img, u0, v0, w, h, 0, 0, w, h);
+    }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+  }
 
   // ---------- Chest lid animation ----------
   // Lids open while anybody has the chest open; the mesher leaves the lid out while animating.
@@ -3655,6 +3717,7 @@
 
     mpNametags();
     updatePlayerList(dt);
+    if (state === 'inventory' && game.ui.kind === 'inventory') drawInventoryPreview();
     updateHotbar();
     updateStats();
     $('hurt').style.opacity = Math.max(0, player.hurtTime / 0.4) * 0.5;

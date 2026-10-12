@@ -596,6 +596,13 @@ VC.UI = class {
         armor.className = 'armor-col';
         for (let k = 0; k < 4; k++) armor.appendChild(this.slotEl(this.armorSlot(k)));
         box.appendChild(armor);
+        // Player preview (drawn every frame by main.js, looks at the mouse).
+        if (!this.preview) {
+          this.preview = document.createElement('canvas');
+          this.preview.className = 'inv-preview';
+          this.preview.width = 152; this.preview.height = 212;
+        }
+        box.appendChild(this.preview);
         const pv = document.createElement('div');
         pv.className = 'armor-points';
         pv.textContent = `Armadura: ${this.game.player.armorPoints()}`;

@@ -385,3 +385,9 @@ button.mc.video-opt { width: 100%; height: 34px; font-size: 14px; }
   background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0) 55%, rgba(0, 0, 0, 0.45) 100%);
 }
 #fps-counter { position: absolute; left: 6px; top: 4px; font-size: 14px; color: #fff; text-shadow: 1px 1px #000; }
+
+/* Player preview next to the armor slots */
+.inv-preview {
+  width: 76px; height: 106px; margin-right: 8px; align-self: center;
+  background: #000; border: 2px solid; border-color: #373737 #fff #fff #373737; image-rendering: pixelated;
+}

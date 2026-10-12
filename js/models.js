@@ -587,19 +587,41 @@ VC.Models = (function () {
     else quad(blockBuf, pts, tileUV(VC.BP.tex[id * 6 + 4]), 1, light, true);
   }
 
+  // UV lookup for a part key: skin parts read the player skin, the rest the mob atlas.
+  function partUV(key, s, skip) {
+    let uv;
+    if (key.startsWith('skin:')) {
+      const part = key.slice(5);
+      const base = { hat: [8, 8, 8], jacket: [8, 12, 4], rsleeve: [4, 12, 4], lsleeve: [4, 12, 4], rpants: [4, 12, 4], lpants: [4, 12, 4] }[part];
+      uv = skinUV(part, ...(base || s));
+    } else uv = regionUV(key);
+    if (skip) { const full = uv; uv = (face, fi) => (skip.includes(face) ? null : full(face, fi)); }
+    return uv;
+  }
+
   function emit(b, m, world, list) {
     const light = lightAt(world, m.center());
     for (const [key, o, s, pivot, rot, skip] of list) {
       const [xf, xn] = partXf(m, pivot, rot);
-      let uv;
-      if (key.startsWith('skin:')) {
-        const part = key.slice(5);
-        const base = { hat: [8, 8, 8], jacket: [8, 12, 4], rsleeve: [4, 12, 4], lsleeve: [4, 12, 4], rpants: [4, 12, 4], lpants: [4, 12, 4] }[part];
-        uv = skinUV(part, ...(base || s));
-      } else uv = regionUV(key);
-      if (skip) { const full = uv; uv = (face, fi) => (skip.includes(face) ? null : full(face, fi)); }
-      box(b, o, s, uv, xf, xn, light);
+      box(b, o, s, partUV(key, s, skip), xf, xn, light);
     }
+  }
+
+  // Faces of a player model for 2D drawing (inventory preview): corners in model space,
+  // normalized UV rect and which texture ('skin' or 'mobs'). Corner k maps to QUV[k].
+  function previewFaces(m) {
+    const out = [];
+    for (const [key, o, s, pivot, rot, skip] of [...parts(m), ...armorParts(m)]) {
+      const [xf, xn] = partXf(m, pivot, rot);
+      const uv = partUV(key, s, skip), tex = key.startsWith('skin:') ? 'skin' : 'mobs';
+      for (const F of UNIT) {
+        const r = uv(F.face, F.fi);
+        if (!r) continue;
+        const pts = F.c.map((c) => xf([o[0] + c[0] * s[0], o[1] + c[1] * s[1], o[2] + c[2] * s[2]]));
+        out.push({ pts, uv: r, tex, n: xn(F.n) });
+      }
+    }
+    return out;
   }
 
   function arrow(b, a, world) {
@@ -750,5 +772,5 @@ VC.Models = (function () {
   // Atlas layout for resource packs: region key -> { u, v, w, h, d } in pixels of an S x S atlas.
   const atlasInfo = () => ({ regions, S, faceRect });
 
-  return { chestLid, buildAtlas, atlasInfo, makeBuf, mob, armor, heldItem, arrow, droppedItem, thrown, blockEntity, crack, hand, setSkinSize, lightAt, billboard };
+  return { previewFaces, shadeOf, chestLid, buildAtlas, atlasInfo, makeBuf, mob, armor, heldItem, arrow, droppedItem, thrown, blockEntity, crack, hand, setSkinSize, lightAt, billboard };
 })();
