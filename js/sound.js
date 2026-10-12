@@ -251,6 +251,14 @@ VC.Sound = (function () {
       if (twinkle) for (let i = 0; i < 24; i++) noise(o, { t: 0.5 + rnd(0, 0.9), dur: 0.03, type: 'highpass', freq: rnd(2500, 6000), vol: rnd(0.1, 0.3) });
     },
 
+    // Creaking wood + string while drawing a bow.
+    bowPull(pos) {
+      const o = out(pos, 0.7);
+      if (!o) return;
+      noise(o, { dur: 0.9, type: 'bandpass', freq: 380, freqEnd: 700, q: 6, vol: 0.25, attack: 0.15 });
+      tone(o, { dur: 0.8, type: 'triangle', freq: 110, freqEnd: 150, vol: 0.08, attack: 0.2 });
+    },
+
     bow(pos) {
       const o = out(pos, 1);
       if (!o) return;

@@ -1039,7 +1039,7 @@
     if (!s) return;
     if (it && it.food && !it.drink) { if (p.creative || p.food < 20 || it.always) use = { type: 'eat', t: 0 }; return; }
     if (it && it.drink) { use = { type: 'drink', t: 0 }; return; }
-    if (it && it.bow) { if (p.creative || p.inventory.count(I.ARROW) > 0) use = { type: 'bow', t: 0 }; return; }
+    if (it && it.bow) { if (p.creative || p.inventory.count(I.ARROW) > 0) { use = { type: 'bow', t: 0 }; VC.Sound.bowPull(p.eye()); } return; }
     if (it && it.armor) {
       const slot = 36 + it.armor.slot, old = p.inventory.slots[slot];
       p.inventory.slots[slot] = VC.stack(s.id, 1, s.dmg);
@@ -1252,7 +1252,8 @@
       if (power >= 0.1) {
         const e = p.eye(), f = p.forward();
         const speed = 55 * power;
-        game.entities.add(new VC.Arrow(game.world, 'player', [e[0] + f[0] * 0.5, e[1] - 0.1, e[2] + f[2] * 0.5], f.map((c) => c * speed), 0));
+        const arrow = game.entities.add(new VC.Arrow(game.world, 'player', [e[0] + f[0] * 0.5, e[1] - 0.1, e[2] + f[2] * 0.5], f.map((c) => c * speed), 0));
+        if (power >= 1) arrow.crit = true;
         VC.Sound.bow(e);
         if (!p.creative) p.inventory.take(I.ARROW, 1);
         damageHeld(1);
@@ -1589,6 +1590,11 @@
   }
 
   // Zoom (OptiFine's C key): narrower FOV and slower mouse while held.
+  // Drawing a bow narrows the view a little (up to 15% at full draw), like MC.
+  const bowFov = () => {
+    if (!use || use.type !== 'bow') return 1;
+    return 1 - 0.15 * Math.min(1, (use.t * use.t + 2 * use.t) / 3);
+  };
   const zoomFactor = () => (state === 'playing' && !buildActive() && isDown('zoom') ? 0.25 : 1);
 
   // Dynamic lights: light-emitting things held, dropped, burning or exploding (nearest 8).
@@ -2509,7 +2515,7 @@
       d: game.dim, x: r2(p.pos[0]), y: r2(p.pos[1]), z: r2(p.pos[2]),
       yaw: r2(a.yaw), by: r2(a.bodyYaw), hp: r2(a.headPitch), ls: r2(a.limbSwing), la: r2(a.limbAmp),
       sw: r2(a.swing), sn: p.sneaking ? 1 : 0, us: a.using ? 1 : 0, h: s ? s.id : 0, ar: a.armor, el: a.elytra ? 1 : 0,
-      wi: r2(a.wing), ti: r2(a.tilt), dd: p.dead ? 1 : 0, sl: p.sleeping ? 1 : 0, m: modeOf(p), hu: p.hurtTime > 0 ? 1 : 0,
+      wi: r2(a.wing), ti: r2(a.tilt), dd: p.dead ? 1 : 0, sl: p.sleeping ? 1 : 0, m: modeOf(p), hu: p.hurtTime > 0 ? 1 : 0, bw: a.bowing ? 1 : 0,
     };
   }
   function mpApplyState(r, st) {
@@ -2529,7 +2535,7 @@
       av.pos = r.pos.slice();
       Object.assign(av, {
         yaw: st.yaw, bodyYaw: st.by, headPitch: st.hp, limbSwing: st.ls, limbAmp: st.la, swing: st.sw, sneaking: !!st.sn,
-        using: !!st.us, armor: st.ar || [null, null, null, null], elytra: !!st.el, wing: st.wi || 0, tilt: st.ti || 0, dead: !!st.dd,
+        using: !!st.us, bowing: !!st.bw, armor: st.ar || [null, null, null, null], elytra: !!st.el, wing: st.wi || 0, tilt: st.ti || 0, dead: !!st.dd,
       });
       av.deathTime = av.dead ? (av.deathTime || 0) + 0.016 : 0;
       av.skin = !!r.skinH;
@@ -3305,6 +3311,7 @@
     a.swing = swingT < 1 ? swingT : 0;
     a.sneaking = p.sneaking;
     a.using = !!use;
+    a.bowing = !!(use && use.type === 'bow');
     a.dead = p.dead;
     a.deathTime = p.dead ? a.deathTime + dt : 0;
     a.elytra = false;
@@ -3412,7 +3419,8 @@
       let useAnim = 0;
       if (use && (use.type === 'eat' || use.type === 'drink')) useAnim = Math.abs(Math.sin(use.t * 12)) * 0.5 + 0.5;
       if (use && use.type === 'bow') useAnim = Math.min(1, use.t);
-      VC.Models.hand(bufs.handB, bufs.handI, bufs.handM, { eye, yaw: p.yaw, pitch: p.pitch }, p.held(), swingT >= 1 ? 0 : swingT, useAnim, light, game.skin ? bufs.handS : null);
+      const pull = use && use.type === 'bow' ? VC.SPRITE_INDEX['bow_pulling_' + (use.t < 0.3 ? 0 : use.t < 0.75 ? 1 : 2)] : undefined;
+      VC.Models.hand(bufs.handB, bufs.handI, bufs.handM, { eye, yaw: p.yaw, pitch: p.pitch }, p.held(), swingT >= 1 ? 0 : swingT, useAnim, light, game.skin ? bufs.handS : null, pull);
       hand = [{ tex: 'blocks', buf: bufs.handB }, { tex: 'items', buf: bufs.handI }, { tex: 'mobs', buf: bufs.handM }];
       if (game.skin) hand.push({ tex: 'skin', buf: bufs.handS });
     }
@@ -3577,7 +3585,7 @@
       eye: cam.eye,
       yaw: cam.yaw,
       pitch: cam.pitch,
-      fov: settings.fov * (settings.gfx.dynFov ? player.fovMul : 1) * (player.hurtTime > 0 ? 0.98 : 1) * zoomFactor(),
+      fov: settings.fov * (settings.gfx.dynFov ? player.fovMul * bowFov() : 1) * (player.hurtTime > 0 ? 0.98 : 1) * zoomFactor(),
       gfx: settings.gfx,
       dynLights: dynamicLights(cam.eye),
       renderDist: settings.renderDist,

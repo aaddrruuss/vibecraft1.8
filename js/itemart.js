@@ -102,6 +102,20 @@ VC.ItemArt = (function () {
       for (let a = 0; a <= 24; a++) { const ang = Math.PI * 0.75 + (a / 24) * Math.PI; put(9 + Math.cos(ang) * 5.3, 7 + Math.sin(ang) * 5.3, WOOD); }
       line(put, 2, 4, 11, 13, [230, 230, 230], 0);
     });
+    for (let k = 0; k < 3; k++) {
+      sprite('bow_pulling_' + k, (put) => {
+        const r = 5.3 - k * 0.5; // the limbs bend more as it is drawn
+        for (let a = 0; a <= 24; a++) { const ang = Math.PI * 0.75 + (a / 24) * Math.PI; put(9 + Math.cos(ang) * r, 7 + Math.sin(ang) * r, WOOD); }
+        const e0 = [9 + Math.cos(Math.PI * 0.75) * r, 7 + Math.sin(Math.PI * 0.75) * r];
+        const e1 = [9 + Math.cos(Math.PI * 1.75) * r, 7 + Math.sin(Math.PI * 1.75) * r];
+        const pull = 1.2 + k * 1.3, P = [9 + pull * 0.7, 7 + pull * 0.7];
+        line(put, P[0], P[1], 9 - 4.6, 7 - 4.6, [150, 115, 72]);          // arrow shaft
+        put(9 - 4.6, 7 - 4.6, [210, 210, 210]); put(9 - 5.2, 7 - 4.2, [190, 190, 190]); put(9 - 4.2, 7 - 5.2, [190, 190, 190]);
+        line(put, e0[0], e0[1], P[0], P[1], [235, 235, 235], 0);          // string
+        line(put, e1[0], e1[1], P[0], P[1], [235, 235, 235], 0);
+        put(P[0] + 0.6, P[1] + 0.6, [240, 240, 240]);
+      });
+    }
     sprite('arrow', (put) => {
       line(put, 3, 12, 12, 3, [140, 110, 70]);
       put(12, 3, [200, 200, 200]); put(11, 3, [200, 200, 200]); put(12, 4, [200, 200, 200]); put(13, 2, [230, 230, 230]);

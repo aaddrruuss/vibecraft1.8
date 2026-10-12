@@ -446,6 +446,7 @@ VC.Arrow = class {
       return;
     }
     if (this.age > 30) { this.removed = true; return; }
+    if (this.crit && Math.random() < 0.8) game.particle(this.pos, 'spark', 1);
     this.vel[1] -= 20 * dt;
     const drag = this.world.getBlock(Math.floor(this.pos[0]), Math.floor(this.pos[1]), Math.floor(this.pos[2]));
     const k = VC.BP.liquid[drag] ? 0.5 : 0.995;
@@ -465,7 +466,8 @@ VC.Arrow = class {
       const hit = game.entityAt(this.pos, this.owner);
       if (hit) {
         const speed = Math.hypot(...this.vel);
-        const dmg = this.owner === 'player' ? Math.ceil(speed / 55 * 9) : this.dmg;
+        let dmg = this.owner === 'player' ? Math.ceil(speed / 55 * 9) : this.dmg;
+        if (this.crit) dmg += Math.floor(Math.random() * (dmg / 2 + 2));
         const src = [this.pos[0] - this.vel[0], 0, this.pos[2] - this.vel[2]];
         if (hit === game.player) hit.hurt(dmg, src, true, 'fue disparado por Esqueleto');
         else hit.hurt(dmg, src, game);

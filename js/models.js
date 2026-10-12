@@ -348,6 +348,9 @@ VC.Models = (function () {
     const swing = m.swing ? Math.sin(Math.sqrt(m.swing) * PI) : 0;
     const armR = Math.cos(sw * 1.3 + PI) * 0.9 * amp - swing * 1.4 - (m.using ? 0.6 : 0);
     const armL = Math.cos(sw * 1.3) * 0.9 * amp;
+    // Drawing a bow: both arms raised towards where the head looks (like skeletons).
+    const aim = -PI / 2 - m.headPitch + (m.tilt || 0);
+    const rotR = m.bowing ? [aim, hy - 0.1, 0] : null, rotL = m.bowing ? [aim, hy + 0.4, 0] : null;
     const K = (steve, part) => (m.skin ? 'skin:' + part : steve);
     if (m.sneaking) {
       const t = 0.5, c = Math.cos(t), sn = Math.sin(t);
@@ -363,8 +366,8 @@ VC.Models = (function () {
     return [
       [K('steve_head', 'head'), [-4, 0, -4], [8, 8, 8], [0, 24, 0], [hp, hy, 0], 'hat'],
       [K('steve_body', 'body'), [-4, 0, -2], [8, 12, 4], [0, 12, 0], [0, 0, 0], 'jacket'],
-      [K('steve_arm', 'rarm'), [-2, -10, -2], [4, 12, 4], [-6, 22, 0], [armR, 0, 0.05], 'rsleeve'],
-      [K('steve_arm', 'larm'), [-2, -10, -2], [4, 12, 4], [6, 22, 0], [armL, 0, -0.05], 'lsleeve'],
+      [K('steve_arm', 'rarm'), [-2, -10, -2], [4, 12, 4], [-6, 22, 0], rotR || [armR, 0, 0.05], 'rsleeve'],
+      [K('steve_arm', 'larm'), [-2, -10, -2], [4, 12, 4], [6, 22, 0], rotL || [armL, 0, -0.05], 'lsleeve'],
       [K('steve_leg', 'rleg'), [-2, -12, -2], [4, 12, 4], [-2, 12, 0], [leg, 0, 0], 'rpants'],
       [K('steve_leg', 'lleg'), [-2, -12, -2], [4, 12, 4], [2, 12, 0], [-leg, 0, 0], 'lpants'],
     ];
@@ -665,7 +668,7 @@ VC.Models = (function () {
   }
 
   // First-person hand / held item. cam = { eye, yaw, pitch }.
-  function hand(blockBuf, itemBuf, mobBuf, cam, held, swing, use, light, skin) {
+  function hand(blockBuf, itemBuf, mobBuf, cam, held, swing, use, light, skin, sprite) {
     const cp = Math.cos(cam.pitch);
     const F = [-Math.sin(cam.yaw) * cp, Math.sin(cam.pitch), -Math.cos(cam.yaw) * cp];
     const R = [Math.cos(cam.yaw), 0, -Math.sin(cam.yaw)];
@@ -705,7 +708,7 @@ VC.Models = (function () {
     const sz = 0.3;
     const pts = [[-1, -1, 0], [1, -1, 0], [1, 1, 0], [-1, 1, 0]].map((v) =>
       toWorld(rotX(rotZ(rotY([v[0] * sz, v[1] * sz, 0], -0.35), 0.25), tilt).map((c, i) => c + base[i])));
-    if (VC.isItem(id)) quad(itemBuf, pts, tileUV(VC.ITEMS[id].sprite), 1, light, true);
+    if (VC.isItem(id)) quad(itemBuf, pts, tileUV(sprite !== undefined ? sprite : VC.ITEMS[id].sprite), 1, light, true);
     else quad(blockBuf, pts, tileUV(VC.BP.tex[id * 6 + 4]), 1, light, true);
   }
 
