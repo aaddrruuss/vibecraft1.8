@@ -25,6 +25,7 @@
   let atlas = baseTex.atlas;
   renderer.setAtlas(atlas);
   renderer.setTexture('items', baseTex.items);
+  VC.Models.setItemAtlas(baseTex.items);
   renderer.setTexture('mobs', baseTex.mobs);
   const icons = VC.ItemArt.icons(baseTex.items);
   // Block icons are drawn lazily the first time they are needed.
@@ -47,6 +48,7 @@
     renderer.setAtlas(atlas);
     renderer.setFiltering(settings.gfx.mipmaps, settings.gfx.aniso);
     renderer.setTexture('items', t.items);
+    VC.Models.setItemAtlas(t.items);
     renderer.setTexture('mobs', t.mobs);
     for (const k in icons) delete icons[k];
     Object.assign(icons, VC.ItemArt.icons(t.items));

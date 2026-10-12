@@ -583,7 +583,10 @@ VC.Models = (function () {
       const p = rotX([0, b * 5, a * 5], Math.PI / 4);
       return xf([p[0], p[1] - 9, p[2] + 3]);
     });
-    if (VC.isItem(id)) quad(itemBuf, pts, tileUV(VC.ITEMS[id].sprite), 1, light, true);
+    if (VC.isItem(id) && itemPx) {
+      extrudedItem(itemBuf, VC.ITEMS[id].sprite, (q) => { const p = rotX([q[2] * 10, q[1] * 10, q[0] * 10], Math.PI / 4); return xf([p[0], p[1] - 9, p[2] + 3]); },
+        (n) => xn(rotX([n[2], n[1], n[0]], Math.PI / 4)), light);
+    } else if (VC.isItem(id)) quad(itemBuf, pts, tileUV(VC.ITEMS[id].sprite), 1, light, true);
     else quad(blockBuf, pts, tileUV(VC.BP.tex[id * 6 + 4]), 1, light, true);
   }
 
@@ -708,15 +711,20 @@ VC.Models = (function () {
     const id = held ? held.id : 0;
 
     if (!id) {
-      const base = [0.48 + off[0], -0.62 + off[1], 0.55 + off[2]];
-      const xf = (v) => toWorld(rotX(rotY([v[0] * 0.016, v[1] * 0.016, v[2] * 0.06], -0.15), tilt + 0.15).map((c, i) => c + base[i]));
-      const xn = (n) => toWorldN(rotX(rotY(n, -0.15), tilt + 0.15));
+      // The real right arm (4x12x4 px), coming from the bottom-right corner towards the
+      // centre like MC. Arm space: x across, y from shoulder (0) to hand (-12), z depth.
+      const s = 0.045, roll = 0.6;
+      const A = norm3([-0.22, 0.3, 0.92]), X0 = norm3(cross3(A, [0, 1, 0])), Z0 = cross3(X0, A);
+      const cr = Math.cos(roll), sr = Math.sin(roll);
+      const X = X0.map((v, i) => v * cr + Z0[i] * sr), Z = Z0.map((v, i) => v * cr - X0[i] * sr);
+      const sh = [0.44 + off[0] * 0.6, -0.44 + off[1], 0.08 + off[2]];
+      const toCam = (v) => [X[0] * v[0] - A[0] * v[1] + Z[0] * v[2], X[1] * v[0] - A[1] * v[1] + Z[1] * v[2], X[2] * v[0] - A[2] * v[1] + Z[2] * v[2]];
+      const xf = (v) => toWorld(rotX(toCam([v[0] * s, v[1] * s, v[2] * s]), tilt * 0.5).map((c, i) => c + sh[i]));
+      const xn = (n) => toWorldN(rotX(toCam(n), tilt * 0.5));
       if (skin) {
-        // Arm box oriented along the view: use the skin's right arm (4x12x4) faces.
-        const uv = skinUV('rarm', 4, 12, 4);
-        const remap = { top: 'front', bottom: 'back', front: 'bottom', back: 'top', east: 'east', west: 'west' };
-        box(skin, [-2, -2, -6], [4, 4, 12], (face) => uv(remap[face]), xf, xn, light);
-      } else box(mobBuf, [-2, -2, -6], [4, 4, 12], regionUV('hand'), xf, xn, light);
+        box(skin, [-2, -12, -2], [4, 12, 4], skinUV('rarm', 4, 12, 4), xf, xn, light);
+        box(skin, [-2.25, -12.25, -2.25], [4.5, 12.5, 4.5], skinUV('rsleeve', 4, 12, 4), xf, xn, light); // sleeve layer
+      } else box(mobBuf, [-2, -12, -2], [4, 12, 4], regionUV('steve_arm'), xf, xn, light);
       return;
     }
     if (!VC.isItem(id) && !flatBlock(id)) {
@@ -728,10 +736,54 @@ VC.Models = (function () {
     }
     const base = [0.52 + off[0], -0.36 + off[1], 0.75 + off[2]];
     const sz = 0.3;
+    const orient = (v) => rotX(rotZ(rotY(v, -0.55), 0.25), tilt);
     const pts = [[-1, -1, 0], [1, -1, 0], [1, 1, 0], [-1, 1, 0]].map((v) =>
-      toWorld(rotX(rotZ(rotY([v[0] * sz, v[1] * sz, 0], -0.35), 0.25), tilt).map((c, i) => c + base[i])));
-    if (VC.isItem(id)) quad(itemBuf, pts, tileUV(sprite !== undefined ? sprite : VC.ITEMS[id].sprite), 1, light, true);
+      toWorld(orient([v[0] * sz, v[1] * sz, 0]).map((c, i) => c + base[i])));
+    const spr = VC.isItem(id) ? (sprite !== undefined ? sprite : VC.ITEMS[id].sprite) : null;
+    if (spr !== null && itemPx) {
+      // MC-style 3D item: the sprite extruded one pixel thick.
+      extrudedItem(itemBuf, spr, (p) => toWorld(orient([p[0] * 2 * sz, p[1] * 2 * sz, p[2] * 2 * sz]).map((c, i) => c + base[i])), (n) => toWorldN(orient(n)), light);
+    } else if (spr !== null) quad(itemBuf, pts, tileUV(spr), 1, light, true);
     else quad(blockBuf, pts, tileUV(VC.BP.tex[id * 6 + 4]), 1, light, true);
+  }
+
+  // ---------- Extruded item sprites ----------
+  const norm3 = (v) => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
+  const cross3 = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  let itemPx = null, itemW = 0, itemTs = 16;
+  const extrudeCache = new Map();
+  // Pixels of the item atlas, needed to know each sprite's outline (call when textures change).
+  function setItemAtlas(canvas) {
+    itemPx = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+    itemW = canvas.width;
+    itemTs = canvas.width / VC.ATLAS_TILES;
+    extrudeCache.clear();
+  }
+  // Quads in sprite space (x, y in -0.5..0.5, z = +-half a pixel): front, back and one side
+  // strip for every opaque pixel edge, coloured with that pixel.
+  function extrusion(sprite) {
+    if (extrudeCache.has(sprite)) return extrudeCache.get(sprite);
+    const out = [], N = VC.ATLAS_TILES, ts = itemTs, t = 0.5 / ts;
+    const r = tileUV(sprite);
+    const ox = (sprite % N) * ts, oy = Math.floor(sprite / N) * ts;
+    const solid = (i, j) => i >= 0 && j >= 0 && i < ts && j < ts && itemPx[((oy + j) * itemW + ox + i) * 4 + 3] > 127;
+    const X = (i) => i / ts - 0.5, Y = (j) => 0.5 - j / ts;
+    out.push([[[-0.5, -0.5, t], [0.5, -0.5, t], [0.5, 0.5, t], [-0.5, 0.5, t]], r, [0, 0, 1]]);
+    out.push([[[0.5, -0.5, -t], [-0.5, -0.5, -t], [-0.5, 0.5, -t], [0.5, 0.5, -t]], [r[2], r[1], r[0], r[3]], [0, 0, -1]]);
+    for (let j = 0; j < ts; j++) for (let i = 0; i < ts; i++) {
+      if (!solid(i, j)) continue;
+      const uv = [(ox + i + 0.3) / itemW, (oy + j + 0.3) / itemW, (ox + i + 0.7) / itemW, (oy + j + 0.7) / itemW];
+      const x0 = X(i), x1 = X(i + 1), y0 = Y(j + 1), y1 = Y(j);
+      if (!solid(i - 1, j)) out.push([[[x0, y0, -t], [x0, y0, t], [x0, y1, t], [x0, y1, -t]], uv, [-1, 0, 0]]);
+      if (!solid(i + 1, j)) out.push([[[x1, y0, t], [x1, y0, -t], [x1, y1, -t], [x1, y1, t]], uv, [1, 0, 0]]);
+      if (!solid(i, j - 1)) out.push([[[x0, y1, t], [x1, y1, t], [x1, y1, -t], [x0, y1, -t]], uv, [0, 1, 0]]);
+      if (!solid(i, j + 1)) out.push([[[x0, y0, -t], [x1, y0, -t], [x1, y0, t], [x0, y0, t]], uv, [0, -1, 0]]);
+    }
+    extrudeCache.set(sprite, out);
+    return out;
+  }
+  function extrudedItem(buf, sprite, tf, tn, light) {
+    for (const [pts, uv, n] of extrusion(sprite)) quad(buf, pts.map(tf), uv, shadeOf(tn(n)), light, false);
   }
 
   // Chest lid (MC proportions: base 10px, lid 4px), opened `ang` radians around its back hinge.
@@ -772,5 +824,5 @@ VC.Models = (function () {
   // Atlas layout for resource packs: region key -> { u, v, w, h, d } in pixels of an S x S atlas.
   const atlasInfo = () => ({ regions, S, faceRect });
 
-  return { previewFaces, shadeOf, chestLid, buildAtlas, atlasInfo, makeBuf, mob, armor, heldItem, arrow, droppedItem, thrown, blockEntity, crack, hand, setSkinSize, lightAt, billboard };
+  return { setItemAtlas, previewFaces, shadeOf, chestLid, buildAtlas, atlasInfo, makeBuf, mob, armor, heldItem, arrow, droppedItem, thrown, blockEntity, crack, hand, setSkinSize, lightAt, billboard };
 })();
