@@ -124,7 +124,10 @@
   </div>
   <input type="file" id="skin-file" accept="image/png" hidden>
   <p class="hint" id="skin-status">Skin: Steve</p>
-  <button class="mc" id="btn-packs">Paquetes de texturas...</button>
+  <div class="buttons row">
+    <button class="mc half" id="btn-packs">Paquetes de texturas...</button>
+    <button class="mc half" id="btn-sounds">Paquetes de sonido...</button>
+  </div>
   <div class="buttons">
     <button class="mc" id="btn-opt-done">Listo</button>
   </div>
@@ -159,6 +162,20 @@
     <button class="mc half" id="btn-packs-done">Listo</button>
   </div>
   <input type="file" id="pack-file" accept=".zip,application/zip" hidden>
+</div>
+
+<div id="sounds" class="screen bg hidden">
+  <h2>Paquetes de sonido</h2>
+  <div id="sounds-list" class="pack-list"></div>
+  <p class="hint">Admite paquetes de recursos de Minecraft con sonidos (.zip con assets/minecraft/sounds), de la 1.8 o
+    más nuevos. Lo que el paquete no traiga suena como siempre.</p>
+  <p class="hint" id="sounds-status"></p>
+  <button class="mc" id="btn-music">Música de fondo del paquete: SÍ</button>
+  <div class="buttons row">
+    <button class="mc half" id="btn-sound-add">Añadir paquete...</button>
+    <button class="mc half" id="btn-sounds-done">Listo</button>
+  </div>
+  <input type="file" id="sound-file" accept=".zip,application/zip" hidden>
 </div>
 
 <div id="loading" class="screen bg hidden">

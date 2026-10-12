@@ -185,10 +185,17 @@ VC.Packs = (function () {
   ];
 
   // ---------- Building atlases from a pack ----------
+  // Folder holding pack.mcmeta (some zips wrap everything in a top folder).
+  function packRoot(zip) {
+    const meta = zip.names.filter((n) => n.endsWith('pack.mcmeta')).sort((a, b) => a.length - b.length)[0];
+    if (meta) return { meta, root: meta.slice(0, -'pack.mcmeta'.length) };
+    const a = zip.names.find((n) => n.includes('assets/minecraft/'));
+    return { meta: null, root: a ? a.slice(0, a.indexOf('assets/minecraft/')) : '' };
+  }
+
   async function load(buf) {
     const zip = readZip(buf);
-    const meta = zip.names.filter((n) => n.endsWith('pack.mcmeta')).sort((a, b) => a.length - b.length)[0];
-    const root = meta ? meta.slice(0, -'pack.mcmeta'.length) : '';
+    const { meta, root } = packRoot(zip);
     const tex = root + 'assets/minecraft/textures/';
     if (!zip.names.some((n) => n.startsWith(tex))) throw new Error('El .zip no tiene assets/minecraft/textures (¿es un paquete de recursos?)');
     let name = 'Paquete', desc = '', format = 1;
@@ -412,13 +419,55 @@ VC.Packs = (function () {
   const list = () => tx('readonly', (st) => st.getAll()).then((all) => (all || []).map(({ data, ...info }) => info));
   const getData = (id) => tx('readonly', (st) => st.get(id)).then((p) => p && p.data);
   const remove = (id) => tx('readwrite', (st) => st.delete(id));
-  async function install(file) {
+  // ---------- Sounds ----------
+  // { files: Map('dig/stone1' -> ogg bytes), events: sounds.json (names lowercased, file refs only) }
+  async function loadSounds(buf) {
+    const zip = readZip(buf);
+    const { root } = packRoot(zip);
+    const dir = root + 'assets/minecraft/sounds/';
+    const files = new Map();
+    await Promise.all(zip.names.filter((n) => n.startsWith(dir) && n.endsWith('.ogg')).map(async (n) => {
+      try { files.set(n.slice(dir.length, -4), await zip.read(n)); } catch (e) { /* skip */ }
+    }));
+    const events = {};
+    const json = await zip.read(root + 'assets/minecraft/sounds.json').catch(() => null);
+    if (json) {
+      try {
+        const j = JSON.parse(new TextDecoder().decode(json).replace(/^\uFEFF/, ''));
+        for (const [k, v] of Object.entries(j)) {
+          const list = (v.sounds || []).map((e) => (typeof e === 'string' ? { name: e } : e)).filter((e) => e.name && e.type !== 'event')
+            .map((e) => ({ name: e.name.toLowerCase().replace(/^minecraft:/, ''), volume: e.volume === undefined ? 1 : e.volume, pitch: e.pitch === undefined ? 1 : e.pitch, weight: e.weight === undefined ? 1 : e.weight }));
+          events[k.toLowerCase()] = list;
+        }
+      } catch (e) { /* broken sounds.json: files alone still work */ }
+    }
+    return { files, events };
+  }
+
+  // Stores a pack. kind 'textures' also returns it loaded (to apply right away); 'sounds' just checks.
+  async function install(file, kind = 'textures') {
     const data = await file.arrayBuffer();
-    const pack = await load(data); // validates before storing
-    const info = { id: Date.now().toString(36), name: file.name.replace(/\.zip$/i, ''), desc: pack.desc, icon: pack.icon, format: pack.format };
+    const zip = readZip(data);
+    const { root } = packRoot(zip);
+    const hasTex = zip.names.some((n) => n.startsWith(root + 'assets/minecraft/textures/'));
+    const hasSounds = zip.names.some((n) => n.startsWith(root + 'assets/minecraft/sounds/') && n.endsWith('.ogg'));
+    if (kind === 'sounds' && !hasSounds) throw new Error('Este .zip no tiene sonidos (assets/minecraft/sounds/*.ogg)');
+    const pack = hasTex ? await load(data) : null; // validates and gets name/icon
+    let icon = pack ? pack.icon : null, desc = pack ? pack.desc : '', format = pack ? pack.format : 1;
+    if (!pack) {
+      const iconBytes = await zip.read(root + 'pack.png').catch(() => null);
+      if (iconBytes) try { icon = toCanvas(scale(await decodePng(iconBytes), 64, 64)).toDataURL(); } catch (e) { /* no icon */ }
+      const meta = await zip.read(root + 'pack.mcmeta').catch(() => null);
+      if (meta) try {
+        const m = JSON.parse(new TextDecoder().decode(meta).replace(/^\uFEFF/, '')), d = m.pack && m.pack.description;
+        desc = (typeof d === 'string' ? d : d && d.text ? d.text : '').replace(/§./g, '');
+        format = (m.pack && m.pack.pack_format) || 1;
+      } catch (e) { /* no description */ }
+    }
+    const info = { id: Date.now().toString(36), name: file.name.replace(/\.zip$/i, ''), desc, icon, format, hasTex, hasSounds };
     await tx('readwrite', (st) => st.put(Object.assign({ data }, info)));
     return { info, pack };
   }
 
-  return { readZip, load, build, list, getData, install, remove };
+  return { readZip, load, loadSounds, build, list, getData, install, remove };
 })();

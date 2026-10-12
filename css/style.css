@@ -270,7 +270,7 @@ button.mc.conflict { color: #ff5555; }
 button.mc.half { width: 196px; }
 
 /* ---------- Resource packs ---------- */
-#packs-list {
+#packs-list, #sounds-list {
   width: 620px; max-width: 94vw;
   max-height: 52vh;
   overflow-y: auto;

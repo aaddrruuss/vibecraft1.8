@@ -343,7 +343,7 @@
   let swingT = 1;
   let lastSpace = 0, lastW = 0, stepDist = 0;
 
-  const SCREENS = { video: 'video', minigames: 'minigames', join: 'join', packs: 'packs', controls: 'controls', menu: 'menu', newworld: 'newworld', options: 'options', loading: 'loading', ready: 'ready', paused: 'pause', inventory: 'inventory', dead: 'death' };
+  const SCREENS = { sounds: 'sounds', video: 'video', minigames: 'minigames', join: 'join', packs: 'packs', controls: 'controls', menu: 'menu', newworld: 'newworld', options: 'options', loading: 'loading', ready: 'ready', paused: 'pause', inventory: 'inventory', dead: 'death' };
   function setState(s) {
     state = s;
     for (const k in SCREENS) $(SCREENS[k]).classList.toggle('hidden', SCREENS[k] !== SCREENS[s]);
@@ -1837,7 +1837,7 @@
       list.append(r);
     };
     row(null, 'Por defecto', 'Texturas de Vibecraft');
-    for (const p of packs) row(p, p.name, p.desc || '');
+    for (const p of packs) if (p.hasTex !== false) row(p, p.name, p.desc || '');
   }
 
   $('btn-packs').addEventListener('click', () => { $('packs-status').textContent = ''; renderPacks(); setState('packs'); });
@@ -1857,6 +1857,97 @@
     }
   });
   if (settings.pack) activatePack(settings.pack);
+
+  // ---------- Sound packs ----------
+  // Same .zip resource packs (assets/minecraft/sounds + sounds.json), e.g. Minecraft's own sounds
+  // or community packs. Anything the pack lacks keeps the synthesized sound.
+  let soundBusy = false;
+  async function activateSoundPack(id) {
+    if (soundBusy) return;
+    soundBusy = true;
+    const status = $('sounds-status');
+    try {
+      if (!id) VC.Sound.setPack(null);
+      else {
+        status.textContent = 'Cargando sonidos...';
+        const data = await VC.Packs.getData(id);
+        if (!data) throw new Error('El paquete ya no está instalado');
+        const pack = await VC.Packs.loadSounds(data);
+        VC.Sound.setPack(pack);
+        status.textContent = `${pack.files.size} sonidos cargados.`;
+      }
+      settings.soundPack = id || null;
+      saveSettings();
+    } catch (e) {
+      console.error(e);
+      status.textContent = 'Error: ' + e.message;
+      VC.Sound.setPack(null);
+      settings.soundPack = null;
+      saveSettings();
+    }
+    soundBusy = false;
+    renderSoundPacks();
+  }
+  async function renderSoundPacks() {
+    let packs = [];
+    try { packs = await VC.Packs.list(); } catch (e) { $('sounds-status').textContent = 'Este navegador no permite guardar paquetes: ' + e.message; }
+    const list = $('sounds-list');
+    list.innerHTML = '';
+    const row = (info, name, desc) => {
+      const r = document.createElement('div');
+      r.className = 'pack-row' + ((settings.soundPack || null) === (info ? info.id : null) ? ' active' : '');
+      const icon = document.createElement(info && info.icon ? 'img' : 'div');
+      if (info && info.icon) icon.src = info.icon; else icon.className = 'pack-noicon';
+      const text = document.createElement('div');
+      text.className = 'pack-text';
+      const n = document.createElement('span'), d = document.createElement('span');
+      n.className = 'pack-name'; n.textContent = name;
+      d.className = 'pack-desc'; d.textContent = desc;
+      text.append(n, d);
+      r.append(icon, text);
+      r.addEventListener('click', () => activateSoundPack(info ? info.id : null));
+      if (info) {
+        const del = document.createElement('button');
+        del.className = 'mc pack-del';
+        del.textContent = 'X';
+        del.title = 'Borrar paquete';
+        del.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          await VC.Packs.remove(info.id);
+          if (settings.soundPack === info.id) activateSoundPack(null); else renderSoundPacks();
+        });
+        r.append(del);
+      }
+      list.append(r);
+    };
+    row(null, 'Por defecto', 'Sonidos sintetizados de Vibecraft');
+    for (const p of packs) if (p.hasSounds) row(p, p.name, p.desc || '');
+    $('btn-music').textContent = `Música de fondo del paquete: ${settings.music !== false ? 'SÍ' : 'NO'}`;
+  }
+  $('btn-sounds').addEventListener('click', () => { $('sounds-status').textContent = ''; renderSoundPacks(); setState('sounds'); });
+  $('btn-sounds-done').addEventListener('click', () => setState('options'));
+  $('btn-sound-add').addEventListener('click', () => $('sound-file').click());
+  $('btn-music').addEventListener('click', () => {
+    settings.music = settings.music === false;
+    VC.Sound.setMusic(settings.music);
+    saveSettings();
+    renderSoundPacks();
+  });
+  $('sound-file').addEventListener('change', async (e) => {
+    const f = e.target.files[0];
+    e.target.value = '';
+    if (!f) return;
+    $('sounds-status').textContent = `Instalando ${f.name}...`;
+    try {
+      const { info } = await VC.Packs.install(f, 'sounds');
+      await activateSoundPack(info.id);
+    } catch (err) {
+      console.error(err);
+      $('sounds-status').textContent = 'Error: ' + err.message;
+    }
+  });
+  VC.Sound.setMusic(settings.music !== false);
+  if (settings.soundPack) activateSoundPack(settings.soundPack);
 
   $('btn-options').addEventListener('click', () => openOptions('menu'));
   $('btn-pause-options').addEventListener('click', () => openOptions('paused'));

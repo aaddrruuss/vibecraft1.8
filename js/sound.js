@@ -420,8 +420,187 @@ VC.Sound = (function () {
     },
   };
 
+  // ---------- Sound packs (Minecraft resource packs with sounds) ----------
+  // pack = { files: Map('dig/stone1' -> Uint8Array ogg), events: { 'block.stone.break': [{ name, volume, pitch, weight }] } }
+  // Every effect first looks for its MC sound events (1.8 and 1.9+ names), then for standard file
+  // names; if the pack has neither, the synthesized sound plays as before.
+  let pack = null, byBase = new Map();
+  const decoded = new Map(); // file -> Promise<AudioBuffer>
+  function setPack(p) {
+    pack = p;
+    decoded.clear();
+    byBase = new Map();
+    if (!p) return;
+    for (const name of p.files.keys()) {
+      const base = name.replace(/\d+$/, '');
+      if (!byBase.has(base)) byBase.set(base, []);
+      byBase.get(base).push(name);
+    }
+  }
+  function choices(events, files) {
+    for (const n of events) {
+      const ev = pack.events[n];
+      if (!ev) continue;
+      if (!ev.length) return []; // the pack deliberately silences this sound
+      const list = ev.filter((s) => pack.files.has(s.name));
+      if (list.length) return list;
+    }
+    for (const f of files) {
+      const list = byBase.get(f) || (pack.files.has(f) ? [f] : null);
+      if (list) return list.map((name) => ({ name, volume: 1, pitch: 1, weight: 1 }));
+    }
+    return null;
+  }
+  function decode(name) {
+    if (!decoded.has(name)) {
+      const bytes = pack.files.get(name);
+      decoded.set(name, ctx.decodeAudioData(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)).catch(() => null));
+    }
+    return decoded.get(name);
+  }
+  // Plays one of the pack's sounds for these events. Returns false when the pack has none.
+  function packPlay(events, files, pos, gain = 1, pitchVar = 0, range = 16) {
+    if (!pack || !ctx) return false;
+    const list = choices(events, files);
+    if (!list) return false;
+    if (!list.length) return true;
+    const total = list.reduce((a, s) => a + (s.weight || 1), 0);
+    let r = Math.random() * total, pick = list[0];
+    for (const s of list) { r -= s.weight || 1; if (r <= 0) { pick = s; break; } }
+    const o = out(pos, gain * (pick.volume === undefined ? 1 : pick.volume), range);
+    if (!o) return true;
+    decode(pick.name).then((buf) => {
+      if (!buf) return;
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.playbackRate.value = (pick.pitch || 1) * (1 + (Math.random() * 2 - 1) * pitchVar);
+      src.connect(o);
+      src.start();
+      if (pick.onEnd) src.onended = pick.onEnd;
+    });
+    return true;
+  }
+  // Long sounds (music) with a handle to stop them.
+  function packStream(events, files, pos, gain, range, onEnd) {
+    if (!pack || !ctx) return null;
+    const list = choices(events, files);
+    if (!list || !list.length) return null;
+    const pick = list[Math.floor(Math.random() * list.length)];
+    const o = out(pos, gain, range);
+    if (!o) return null;
+    const h = { node: o, src: null, stopped: false };
+    decode(pick.name).then((buf) => {
+      if (!buf || h.stopped) return;
+      h.src = ctx.createBufferSource();
+      h.src.buffer = buf;
+      h.src.connect(o);
+      h.src.onended = () => { if (!h.stopped && onEnd) onEnd(); };
+      h.src.start();
+    });
+    return h;
+  }
+  function stopStream(h) {
+    if (!h) return;
+    h.stopped = true;
+    try { if (h.src) h.src.stop(); h.node.disconnect(); } catch (e) { /* already stopped */ }
+  }
+
+  // Our block materials -> MC names (1.9+ / 1.8).
+  const MAT = {
+    grass: ['grass', 'grass'], gravel: ['gravel', 'gravel'], sand: ['sand', 'sand'], snow: ['snow', 'snow'], wood: ['wood', 'wood'],
+    glass: ['glass', 'stone'], metal: ['metal', 'stone'], cloth: ['wool', 'cloth'], slime: ['slime_block', 'stone'], water: ['stone', 'stone'], stone: ['stone', 'stone'],
+  };
+  function blockPack(kind, id, pos, gain) {
+    const [m9, m8] = MAT[material(id)] || MAT.stone;
+    const ev9 = { dig: 'break', place: 'place', hit: 'hit', step: 'step' }[kind];
+    const ev8 = kind === 'hit' || kind === 'step' ? 'step' : 'dig';
+    const events = [`block.${m9}.${ev9}`, `${ev8}.${m8}`];
+    if (m9 === 'slime_block') events.unshift(`block.slime.${ev9}`);
+    const files = [`${ev8}/${m8}`];
+    if (material(id) === 'glass' && kind === 'dig') { events.unshift('block.glass.break', 'dig.glass'); files.unshift('random/glass'); }
+    return packPlay(events, files, pos, gain, 0.1);
+  }
+  // Mob sounds: [1.9+ entity name, 1.8 folder, 1.8 idle / hurt / death names]
+  const MOB = {
+    zombie: ['zombie', 'zombie', 'say', 'hurt', 'death'], skeleton: ['skeleton', 'skeleton', 'say', 'hurt', 'death'],
+    creeper: ['creeper', 'creeper', 'say', 'say', 'death'], spider: ['spider', 'spider', 'say', 'say', 'death'],
+    pig: ['pig', 'pig', 'say', 'say', 'death'], cow: ['cow', 'cow', 'say', 'hurt', 'hurt'], sheep: ['sheep', 'sheep', 'say', 'say', 'say'],
+    chicken: ['chicken', 'chicken', 'say', 'hurt', 'hurt'], pigman: ['zombified_piglin', 'zombiepig', 'zpig', 'zpighurt', 'zpigdeath'],
+    ghast: ['ghast', 'ghast', 'moan', 'scream', 'death'],
+  };
+  function mobPack(type, kind, pos) {
+    const d = MOB[type];
+    if (!d) return false;
+    const k9 = { idle: 'ambient', hurt: 'hurt', death: 'death' }[kind], k8 = d[{ idle: 2, hurt: 3, death: 4 }[kind]];
+    const events = [`entity.${d[0]}.${k9}`, `mob.${d[1]}.${k8}`];
+    if (type === 'pigman') events.splice(1, 0, `entity.zombie_pigman.${k9}`, `entity.zombie_pig.${k9}`);
+    if (type === 'ghast' && kind === 'idle') events.push('entity.ghast.ambient');
+    return packPlay(events, [`mob/${d[1]}/${k8}`], pos, kind === 'idle' ? 0.8 : 1, 0.1);
+  }
+  // Simple effects: effect -> [events..., files...]
+  const SIMPLE = {
+    hurt: [['entity.player.hurt', 'game.player.hurt', 'damage.hit'], ['damage/hit']],
+    explode: [['entity.generic.explode', 'random.explode'], ['random/explode']],
+    fuse: [['entity.creeper.primed', 'entity.tnt.primed', 'random.fuse', 'game.tnt.primed'], ['random/fuse']],
+    bow: [['entity.arrow.shoot', 'random.bow'], ['random/bow']],
+    arrowHit: [['entity.arrow.hit', 'random.bowhit'], ['random/bowhit']],
+    eat: [['entity.generic.eat', 'random.eat'], ['random/eat']],
+    burp: [['entity.player.burp', 'random.burp'], ['random/burp']],
+    pop: [['entity.item.pickup', 'random.pop'], ['random/pop']],
+    drink: [['entity.generic.drink', 'random.drink'], ['random/drink']],
+    click: [['ui.button.click', 'random.click', 'gui.button.press'], ['random/click']],
+    chest: [['block.chest.open', 'random.chestopen'], ['random/chestopen']],
+    chestClose: [['block.chest.close', 'random.chestclosed'], ['random/chestclosed']],
+    fizz: [['block.fire.extinguish', 'random.fizz'], ['random/fizz']],
+    ignite: [['item.flintandsteel.use', 'fire.ignite'], ['fire/ignite']],
+    equip: [['item.armor.equip_generic', 'item.armor.equip_iron'], []],
+    shear: [['entity.sheep.shear', 'mob.sheep.shear'], ['mob/sheep/shear']],
+    portalTrigger: [['block.portal.trigger', 'portal.trigger'], ['portal/trigger']],
+    portalTravel: [['block.portal.travel', 'portal.travel'], ['portal/travel']],
+    levelUp: [['entity.player.levelup', 'random.levelup'], ['random/levelup']],
+    fireworkLaunch: [['entity.firework_rocket.launch', 'entity.firework.launch', 'fireworks.launch'], ['fireworks/launch']],
+  };
+  const POS_ARG = { hurt: 0, explode: 0, fuse: 0, bow: 0, arrowHit: 0, chest: 0, chestClose: 0, fizz: 0, ignite: 0, shear: 0, fireworkLaunch: 0 };
+
+  // ---------- Background music (only from a sound pack: MC's music is copyrighted) ----------
+  let music = null, musicTimer = null, musicOn = true;
+  function scheduleMusic(delay) {
+    clearTimeout(musicTimer);
+    if (!musicOn || !pack) return;
+    musicTimer = setTimeout(() => {
+      music = packStream(['music.game', 'music.creative', 'music.overworld'], ['music/game/calm', 'music/game/hal', 'music/game/nuance', 'music/game/piano'], null, 0.5, 16, () => scheduleMusic(60000 + Math.random() * 240000));
+      if (!music) scheduleMusic(30000);
+    }, delay);
+  }
+
   // UI clicks on every Minecraft-style button.
   document.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('button.mc')) S.click(); });
+
+  // Route effects through the sound pack first.
+  const wrap = (name, fn) => { const orig = S[name]; S[name] = (...a) => (pack && fn(...a) ? undefined : orig(...a)); };
+  for (const k of ['dig', 'place', 'hit', 'step']) wrap(k, (id, pos) => blockPack(k, id, pos, { dig: 1, place: 0.9, hit: 0.3, step: 0.25 }[k]));
+  wrap('mob', (type, kind, pos) => mobPack(type, kind, pos));
+  for (const [k, [events, files]] of Object.entries(SIMPLE)) {
+    wrap(k, (...a) => packPlay(events, files, POS_ARG[k] === 0 ? a[0] : null, 1, 0.05));
+  }
+  wrap('splash', (pos, big) => packPlay(big ? ['entity.generic.splash', 'entity.player.splash.high_speed', 'game.player.swim.splash', 'random.splash'] : ['entity.player.splash', 'entity.generic.splash', 'game.player.swim.splash', 'random.splash'], ['liquid/splash', 'random/splash'], pos));
+  wrap('door', (open, pos) => packPlay(open ? ['block.wooden_door.open', 'random.door_open'] : ['block.wooden_door.close', 'random.door_close'], [open ? 'random/door_open' : 'random/door_close'], pos));
+  wrap('fireworkBlast', (pos, large, twinkle) => {
+    const ok = packPlay(large ? ['entity.firework_rocket.large_blast', 'entity.firework.large_blast', 'fireworks.largeBlast'] : ['entity.firework_rocket.blast', 'entity.firework.blast', 'fireworks.blast'],
+      [large ? 'fireworks/largeblast' : 'fireworks/blast'], pos, 1.5, 0, 128);
+    if (ok && twinkle) packPlay(['entity.firework_rocket.twinkle', 'entity.firework.twinkle', 'fireworks.twinkle'], ['fireworks/twinkle'], pos, 1.2, 0, 128);
+    return ok;
+  });
+  // Music discs: the real track if the pack has it.
+  const origRecord = S.playRecord;
+  S.playRecord = (name, pos) => {
+    S.stopRecord();
+    const h = packStream([`music_disc.${name}`, `records.${name}`], [`records/${name}`], pos, 1, 64);
+    if (h) record = h.node; else origRecord(name, pos);
+  };
+  S.setPack = (p) => { setPack(p); stopStream(music); music = null; scheduleMusic(5000); };
+  S.hasPack = () => !!pack;
+  S.setMusic = (on) => { musicOn = on; if (!on) { stopStream(music); music = null; clearTimeout(musicTimer); } else scheduleMusic(3000); };
 
   return S;
 })();
