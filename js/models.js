@@ -712,6 +712,32 @@ VC.Models = (function () {
     else quad(blockBuf, pts, tileUV(VC.BP.tex[id * 6 + 4]), 1, light, true);
   }
 
+  // Chest lid (MC proportions: base 10px, lid 4px), opened `ang` radians around its back hinge.
+  function chestLid(b, x, y, z, state, ang, world) {
+    const P = VC.BP, m = state & 15, front = VC.FACE_OF_FACING[m & 3];
+    const side = front === 0 || front === 1 ? 4 : 0;
+    // Canonical frame: front is +z. Then turn it to the chest's facing.
+    const yaw = { 4: 0, 5: Math.PI, 0: Math.PI / 2, 1: -Math.PI / 2 }[front];
+    const crop = (tile, u0, v0, u1, v1) => { const r = tileUV(tile), w = r[2] - r[0], h = r[3] - r[1]; return [r[0] + u0 * w, r[1] + v0 * h, r[0] + u1 * w, r[1] + v1 * h]; };
+    const t = (fi) => P.tex[state * 6 + fi];
+    const uvFor = (face) => {
+      if (face === 'top' || face === 'bottom') return crop(t(2), 1 / 16, 1 / 16, 15 / 16, 15 / 16);
+      return crop(t(face === 'front' ? front : side), 1 / 16, 2 / 16, 15 / 16, 6 / 16);
+    };
+    const light = lightAt(world, [x + 0.5, y + 0.8, z + 0.5]);
+    const xf = (v) => {
+      // v in pixels; hinge at y = 10, z = 1 (back edge).
+      let p = rotX([v[0], v[1] - 10, v[2] - 1], -ang);
+      p = [p[0] - 8, p[1] + 10, p[2] + 1 - 8];
+      p = rotY(p, yaw);
+      return [x + 0.5 + p[0] / 16, y + p[1] / 16, z + 0.5 + p[2] / 16];
+    };
+    const xn = (n) => rotY(rotX(n, -ang), yaw);
+    box(b, [1, 10, 1], [14, 4, 14], uvFor, xf, xn, light);
+    // Latch.
+    box(b, [7, 8, 15], [2, 4, 1], () => crop(t(front), 7 / 16, 3 / 16, 9 / 16, 7 / 16), xf, xn, light);
+  }
+
   function setSkinSize(h) { skinH = h === 32 ? 32 : 64; }
 
   // Camera-facing sprite from the item atlas (particles, fireballs).
@@ -724,5 +750,5 @@ VC.Models = (function () {
   // Atlas layout for resource packs: region key -> { u, v, w, h, d } in pixels of an S x S atlas.
   const atlasInfo = () => ({ regions, S, faceRect });
 
-  return { buildAtlas, atlasInfo, makeBuf, mob, armor, heldItem, arrow, droppedItem, thrown, blockEntity, crack, hand, setSkinSize, lightAt, billboard };
+  return { chestLid, buildAtlas, atlasInfo, makeBuf, mob, armor, heldItem, arrow, droppedItem, thrown, blockEntity, crack, hand, setSkinSize, lightAt, billboard };
 })();

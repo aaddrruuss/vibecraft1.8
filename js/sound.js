@@ -313,6 +313,13 @@ VC.Sound = (function () {
       tone(o, { dur: 0.12, type: 'triangle', freq: open ? 220 : 160, vol: 0.25 });
     },
 
+    chestClose(pos) {
+      const o = out(pos, 0.8);
+      if (!o) return;
+      noise(o, { dur: 0.12, type: 'lowpass', freq: 700, vol: 0.6 });
+      tone(o, { dur: 0.1, type: 'triangle', freq: 150, freqEnd: 90, vol: 0.3 });
+    },
+
     chest(pos) {
       const o = out(pos, 0.8);
       if (!o) return;

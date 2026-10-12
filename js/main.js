@@ -407,6 +407,7 @@
     world.onIgnite = (x, y, z) => igniteTNT(x, y, z, 0.5 + Math.random());
     world.onFizz = (x, y, z) => VC.Sound.fizz([x + 0.5, y + 0.5, z + 0.5]);
     world.onSet = (x, y, z, s) => mpBlockChanged(dim, x, y, z, s);
+    world.chestOpen = (x, y, z) => game.dims[dim] && game.world === world && chestAnims.has(x + ',' + y + ',' + z);
     if (dim === 'overworld') {
       world.extraBoxes = (x0, y0, z0, x1, y1, z1, out) => { if (game.build) game.build.collide(x0, y0, z0, x1, y1, z1, out); };
       world.pieceAt = (pos) => (game.build ? game.build.at(pos) : null);
@@ -965,10 +966,11 @@
     if (CONTAINERS[bid]) {
       const [n, title, cols] = CONTAINERS[bid];
       VC.Sound.chest([x + 0.5, y + 0.5, z + 0.5]);
+      if (bid === 54 || bid === 146) chestViewer(x, y, z, true, true);
       openContainer('chest', containerAt(x, y, z, n, title, cols));
       return true;
     }
-    if (bid === 130) { VC.Sound.chest([x + 0.5, y + 0.5, z + 0.5]); game.enderChest.title = 'Cofre de Ender'; game.enderChest.cols = 9; openContainer('chest', game.enderChest); return true; }
+    if (bid === 130) { VC.Sound.chest([x + 0.5, y + 0.5, z + 0.5]); chestViewer(x, y, z, true, true); game.enderChest.title = 'Cofre de Ender'; game.enderChest.cols = 9; openContainer('chest', game.enderChest); return true; }
     if (bid === 26) {
       if (game.dim === 'nether') {
         breakAt(x, y, z, id, false, null);
@@ -1420,6 +1422,12 @@
   }
 
   game.ui = new VC.UI(game);
+  // Closing any container (Esc, death, portals...) also closes the chest lid we opened.
+  const uiClose = game.ui.close.bind(game.ui);
+  game.ui.close = () => {
+    if (myChest) { const [x, y, z] = myChest; myChest = null; chestViewer(x, y, z, false, true); }
+    uiClose();
+  };
   game.chat = new VC.Chat(game, {
     get playerName() { return playerName(); },
     // Multiplayer helpers for /tp.
@@ -1877,6 +1885,45 @@
     closeWorld(true);
     setState('menu');
   });
+
+  // ---------- Chest lid animation ----------
+  // Lids open while anybody has the chest open; the mesher leaves the lid out while animating.
+  const chestAnims = new Map(); // "x,y,z" -> { x, y, z, viewers, t }
+  let myChest = null;
+  function chestViewer(x, y, z, open, mine) {
+    const k = x + ',' + y + ',' + z;
+    let a = chestAnims.get(k);
+    if (!a) {
+      if (!open) return;
+      a = { x, y, z, viewers: 0, t: 0 };
+      chestAnims.set(k, a);
+      remeshAt(x, z);
+    }
+    a.viewers = Math.max(0, a.viewers + (open ? 1 : -1));
+    if (mine) {
+      myChest = open ? [x, y, z] : null;
+      mpSend({ t: 'chest', d: game.dim, x, y, z, o: open });
+    }
+  }
+  function remeshAt(x, z) {
+    const ch = game.world && game.world.getChunk(x >> 4, z >> 4);
+    if (ch) ch.dirty = true;
+  }
+  function drawChestLids(w, dt, blockRanges) {
+    if (!chestAnims.size) return;
+    const start = bufs.blocks.n;
+    for (const [k, a] of chestAnims) {
+      const s = w.getBlock(a.x, a.y, a.z), bid = s >> 4;
+      if (bid !== 54 && bid !== 146 && bid !== 130) { chestAnims.delete(k); remeshAt(a.x, a.z); continue; }
+      const was = a.t;
+      a.t = Math.max(0, Math.min(1, a.t + (a.viewers > 0 ? dt : -dt) * 4));
+      if (was > 0.4 && a.t <= 0.4 && a.viewers === 0) VC.Sound.chestClose([a.x + 0.5, a.y + 0.5, a.z + 0.5]);
+      if (a.t <= 0 && a.viewers === 0) { chestAnims.delete(k); remeshAt(a.x, a.z); continue; }
+      const e = 1 - (1 - a.t) ** 3;
+      VC.Models.chestLid(bufs.blocks, a.x, a.y, a.z, s, e * Math.PI / 2 * 0.95, w);
+    }
+    if (bufs.blocks.n > start) blockRanges.push({ start, count: bufs.blocks.n - start, tint: null });
+  }
 
   // ---------- Build minigame (Fortnite-style building) ----------
   // bm.mode: piece kind while in build mode (null = pickaxe). bm.edit: active edit session.
@@ -2774,6 +2821,10 @@
         buildNet(m);
         if (mp.host) mp.room.broadcast(m, from);
         break;
+      case 'chest':
+        if (m.d === game.dim) chestViewer(m.x, m.y, m.z, m.o, false);
+        if (mp.host) mp.room.broadcast(m, from);
+        break;
       case 'tpto': {
         if (!mp.host) break;
         const tp = Object.assign({}, m, { t: 'tp' });
@@ -3353,6 +3404,7 @@
       if (bufs.blocks.n > bStart) blockRanges.push({ start: bStart, count: bufs.blocks.n - bStart, tint: null });
     }
     const remoteSkins = mpDrawPlayers(w, ranges, blockRanges);
+    drawChestLids(w, dt, blockRanges);
     const overlays = buildDraw(eye, blockRanges);
     const shadows = entityShadows(eye);
     if (shadows) overlays.unshift(shadows);

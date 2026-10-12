@@ -143,9 +143,10 @@ VC.Mesher = (function () {
   }
 
   // Shaped block made of boxes.
-  function shaped(b, x, y, z, s, p) {
+  const CHEST_BASE = [[1 / 16, 0, 1 / 16, 15 / 16, 10 / 16, 15 / 16]];
+  function shaped(b, x, y, z, s, p, chestOpen) {
     const nb = (dx, dy, dz) => pb[p + off(dx, dy, dz)];
-    const boxes = VC.Shapes.boxes(s, nb);
+    const boxes = chestOpen ? CHEST_BASE : VC.Shapes.boxes(s, nb);
     reserve(b, boxes.length * 6);
     for (const bx of boxes) {
       for (let f = 0; f < 6; f++) {
@@ -198,7 +199,11 @@ VC.Mesher = (function () {
           if (sh === SH.none) continue;
           const isLiquid = liquid[s];
           const b = P.translucent[s] ? W : O;
-          if (sh !== SH.cube && !isLiquid) { shaped(b, x, y, z, s, p); continue; }
+          if (sh !== SH.cube && !isLiquid) {
+            const open = sh === SH.chest && world.chestOpen && world.chestOpen(ch.cx * 16 + x, y, ch.cz * 16 + z);
+            shaped(b, x, y, z, s, p, open);
+            continue;
+          }
 
           const topH = isLiquid ? liquidHeight(s, pb[p + LAYER]) : 1;
           const self = s >> 4;
